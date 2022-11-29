@@ -41,6 +41,7 @@
 #include <noggit/ui/tools/BrushStack/BrushStack.hpp>
 #include <noggit/ui/tools/LightEditor/LightEditor.hpp>
 #include <noggit/ui/tools/ChunkManipulator/ChunkManipulatorPanel.hpp>
+#include <noggit/ui/areaTrigger_tool.hpp>
 #include <external/imguipiemenu/PieMenu.hpp>
 #include <external/tracy/Tracy.hpp>
 #include <noggit/ui/object_palette.hpp>
@@ -311,6 +312,9 @@ void MapView::setToolPropertyWidgetVisibility(editing_mode mode)
   case editing_mode::paint:
     _texture_browser_dock->setVisible(!ui_hidden && _settings->value("map_view/texture_browser", false).toBool());
     _texture_palette_dock->setVisible(!ui_hidden && _settings->value("map_view/texture_palette", false).toBool());
+    break;
+  case editing_mode::areatrigger:
+    _viewport_overlay_ui->gizmoBar->setVisible(!ui_hidden);
     break;
   default:
     break;
@@ -799,6 +803,12 @@ void MapView::setupScriptingUi()
   _tool_panel_dock->registerTool("Scripting", scriptingTool);
 }
 
+void MapView::setupAreaTriggerUi()
+{
+    AreaTriggerTool = new Noggit::Ui::areatrigger_tool(this, this);
+    _tool_panel_dock->registerTool("Area Trigger Editor", AreaTriggerTool);
+}
+
 void MapView::setupObjectEditorUi()
 {
   /* Tool */
@@ -1036,6 +1046,17 @@ void MapView::updateDetailInfos(bool no_sel_change_check)
             chunk_sel.updateDetails(guidetailInfos);
           }
           break;
+        }
+        case eArea_Trigger:
+        {
+            auto obj = std::get<AreaTrigger*>(last_selection);
+
+            if (no_sel_change_check || reinterpret_cast<std::uintptr_t>(obj) != last_sel || NOGGIT_CUR_ACTION)
+            {
+                last_sel = reinterpret_cast<std::uintptr_t>(obj);
+                obj->updateDetails(guidetailInfos);
+            }
+            break;
         }
       }
     }
@@ -2556,6 +2577,7 @@ void MapView::createGUI()
   setupLightEditorUi();
   setupChunkManipulatorUi();
   setupScriptingUi();
+  setupAreaTriggerUi();
   // End combined dock
 
   setupViewportOverlay();
@@ -4044,6 +4066,7 @@ selection_result MapView::intersect_result(bool terrain_only)
     , _draw_wmo.get()
     , _draw_models.get()
     , _draw_hidden_models.get()
+    , terrainMode == editing_mode::areatrigger
     )
   );
 
@@ -4126,18 +4149,42 @@ void MapView::doSelection (bool selectTerrainOnly, bool mouseMove)
       _world->reset_selection();
       _world->add_to_selection(hit);
     }
+    else if (hit.index() == eArea_Trigger)
+    {
+        _world->reset_selection();
+        _world->add_to_selection(hit);
+        auto obj = std::get<selected_generic_object_type>(hit);
+        // static_cast<AreaTrigger*>(obj)->_selected = true;
+        // AreaTriggerTool->select_area_trigger();
+    }
 
     auto action = NOGGIT_CUR_ACTION;
 
     if (!action || (!action->getBlockCursor()) || !_locked_cursor_mode.get())
     {
-      _cursor_pos = hit.index() == eEntry_Object ? std::get<selected_object_type>(hit)->pos
-                                                 : hit.index() == eEntry_MapChunk ? std::get<selected_chunk_type>(hit).position
-                                                                                  : throw std::logic_error("bad variant");
+        switch (hit.index())
+        {
+        case eEntry_Object:
+            _cursor_pos = std::get<selected_object_type>(hit)->pos;
+            break;
+        case eEntry_MapChunk:
+            _cursor_pos = std::get<selected_chunk_type>(hit).position;
+            break;
+        case eArea_Trigger:
+            _cursor_pos = std::get<AreaTrigger*>(hit)->pos;
+            break;
+        default:
+            throw std::logic_error("bad variant");
+            break;
+        }
+      // _cursor_pos = hit.index() == eEntry_Object ? std::get<selected_object_type>(hit)->pos
+      //                                            : hit.index() == eEntry_MapChunk ? std::get<selected_chunk_type>(hit).position
+      //                                                                             : throw std::logic_error("bad variant");
     }
 
   }
 
+  AreaTriggerTool->update_selection(_world.get());
   _rotation_editor_need_update = true;
 }
 
@@ -5101,6 +5148,10 @@ void MapView::mouseReleaseEvent (QMouseEvent* event)
         }
         
         _area_selection->hide();
+    }
+    else if ((terrainMode == editing_mode::areatrigger || terrainMode == editing_mode::light) && !_mod_ctrl_down)
+    {
+        doSelection(false);
     }
     else 
     {

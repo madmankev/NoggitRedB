@@ -16,6 +16,7 @@
 #include <noggit/ui/tools/ViewportGizmo/ViewportGizmo.hpp>
 #include <noggit/ui/tools/ViewportManager/ViewportManager.hpp>
 #include <noggit/ui/tools/ToolPanel/ToolPanel.hpp>
+#include <noggit/ui/areaTrigger_tool.hpp>
 #include <noggit/TabletManager.hpp>
 #include <external/qtimgui/QtImGui.h>
 #include <opengl/texture.hpp>
@@ -93,6 +94,7 @@ namespace Noggit
     class hole_tool;
     struct tileset_chooser;
     class ObjectPalette;
+    class areatrigger_tool;
   }
 }
 
@@ -419,6 +421,7 @@ private:
   Noggit::Ui::Tools::LightEditor* lightEditor;
   Noggit::Ui::Tools::ChunkManipulator::ChunkManipulatorPanel* _chunk_manipulator;
   Noggit::Scripting::scripting_tool* scriptingTool;
+  Noggit::Ui::areatrigger_tool* AreaTriggerTool;
 
   OpenGL::texture* const _texBrush;
 
@@ -470,6 +473,7 @@ private:
   void setupStampUi();
   void setupLightEditorUi();
   void setupScriptingUi();
+  void setupAreaTriggerUi();
   void setupChunkManipulatorUi();
   void setupNodeEditor();
   void setupAssetBrowser();

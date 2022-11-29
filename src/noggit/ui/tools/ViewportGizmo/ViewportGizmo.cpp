@@ -38,12 +38,15 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
 
   int n_selected = selection.size();
 
-  if (!n_selected || (n_selected == 1 & selection[0].index() != eEntry_Object))
+  if (!n_selected || (n_selected == 1 & selection[0].index() == eEntry_MapChunk))
     return;
 
   if (n_selected == 1)
   {
-    gizmo_selection_type = std::get<selected_object_type>(selection[0])->which() == eMODEL ? GizmoInternalMode::MODEL : GizmoInternalMode::WMO;
+      if (selection[0].index() == eEntry_Object)
+          gizmo_selection_type = std::get<selected_object_type>(selection[0])->which() == eMODEL ? GizmoInternalMode::MODEL : GizmoInternalMode::WMO;
+      else if (selection[0].index() == eArea_Trigger)
+          gizmo_selection_type = AREATRIGGER;
   }
   else
   {
@@ -51,6 +54,7 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
   }
 
   SceneObject* obj_instance;
+  AreaTrigger* areatrigger;
 
   ImGuizmo::SetID(_gizmo_context);
 
@@ -81,6 +85,14 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
       object_matrix = obj_instance->transformMatrix();
       ImGuizmo::Manipulate(glm::value_ptr(model_view_trs), glm::value_ptr(projection_trs), _gizmo_operation, _gizmo_mode, glm::value_ptr(object_matrix), glm::value_ptr(delta_matrix), nullptr);
       break;
+    }
+    case AREATRIGGER:
+    {
+        areatrigger = std::get<AreaTrigger*>(selection[0]);
+        areatrigger->recalcExtents();
+        object_matrix = areatrigger->transformMatrix(); // don't need ?
+        ImGuizmo::Manipulate(glm::value_ptr(model_view_trs), glm::value_ptr(projection_trs), _gizmo_operation, _gizmo_mode, glm::value_ptr(object_matrix), glm::value_ptr(delta_matrix), nullptr);
+        break;
     }
     case MULTISELECTION:
     {
@@ -235,6 +247,85 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
       if (_world)
         _world->updateTilesEntry(selected, model_update::add);
     }
+  }
+  else if (gizmo_selection_type == AREATRIGGER)
+  {
+      for (auto& selected : selection)
+      {
+          if (selected.index() != eArea_Trigger)
+              continue;
+
+          areatrigger = std::get<AreaTrigger*>(selected);
+          // NOGGIT_CUR_ACTION->registerObjectTransformed(obj_instance);
+
+          areatrigger->recalcExtents();
+          object_matrix = areatrigger->transformMatrix();
+
+
+          glm::mat4 glm_transform_mat = delta_matrix;
+
+          glm::vec3& pos = areatrigger->pos;
+          math::degrees::vec3& rotation = areatrigger->dir;
+
+          float& sphere_radius = areatrigger->radius;
+          float& box_scale_x = areatrigger->boxWidth;
+          float& box_scale_y = areatrigger->boxHeigth;
+          float& box_scale_z = areatrigger->boxLength;
+
+          glm::vec3 new_scale;
+          glm::quat new_orientation;
+          glm::vec3 new_translation;
+          glm::vec3 new_skew_;
+          glm::vec4 new_perspective_;
+
+          glm::decompose(glm_transform_mat,
+              new_scale,
+              new_orientation,
+              new_translation,
+              new_skew_,
+              new_perspective_
+          );
+
+          new_orientation = glm::conjugate(new_orientation);
+
+          switch (_gizmo_operation)
+          {
+
+          case ImGuizmo::TRANSLATE:
+          {
+              pos += glm::vec3(new_translation.x, new_translation.y, new_translation.z);
+              break;
+          }
+          case ImGuizmo::ROTATE:
+          {
+              if (areatrigger->shape == SPHERE)
+                  break;
+
+              auto rot_euler = glm::eulerAngles(new_orientation).operator*=(-1.f) * 57.2957795f;
+              // rotation += glm::vec3(math::degrees(rot_euler.x)._, math::degrees(rot_euler.y)._, math::degrees(rot_euler.z)._);
+              areatrigger->boxYaw += rot_euler.y;
+              break;
+          }
+          case ImGuizmo::SCALE:
+          {
+              // scale = std::max(0.001f, new_scale.x);
+              if (areatrigger->shape == SPHERE)
+                  sphere_radius = std::max(0.001f, new_scale.x);
+              else if ((areatrigger->shape == BOX))
+              {
+                  box_scale_x = std::max(0.001f, new_scale.x);
+                  box_scale_y = std::max(0.001f, new_scale.y);
+                  box_scale_z = std::max(0.001f, new_scale.z);
+              }
+              break;
+          }
+          case ImGuizmo::BOUNDS:
+          {
+              throw std::logic_error("Bounds are not supported by this gizmo.");
+          }
+          }
+          areatrigger->recalcExtents();
+      }
   }
   else
   {

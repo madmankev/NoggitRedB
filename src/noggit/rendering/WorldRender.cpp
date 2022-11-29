@@ -921,6 +921,45 @@ void WorldRender::draw (glm::mat4x4 const& model_view
     }
   }
 
+  if (terrainMode == editing_mode::areatrigger)
+  {
+      areaTriggers()->drawAreaTriggers(model_view, projection, camera_pos, frustum, _cull_distance, _view_distance, _world->_current_selection);
+      // glCullFace(GL_FRONT);
+      // for (AreaTrigger& areatrigger : areaTriggers()->areaTriggers)
+      // {
+      //     if (glm::distance(areatrigger.pos, camera_pos) <= _view_distance) // TODO: frustum cull here
+      //     {
+      //         if (areatrigger.Id == 5828)
+      //         {
+      //             int test = 0; // stormwind entrance
+      //         }
+      //         glm::vec4 color = { 1.0f, 1.0f, 1.0f, 1.0f } ;
+      //         if (areatrigger.selected())
+      //             color = { 0.0f, 1.0f, 0.0f, 1.0f };
+      // 
+      //         if (areatrigger.shape == SPHERE)
+      //         {
+      //           _sphere_render.draw(mvp, areatrigger.pos, color, areatrigger.radius, 32, 18, 0.5f, true, false);
+      //         }
+      //         else if (areatrigger.shape == BOX)
+      //         {
+      //             // TODO : rotation 
+      //             glm::mat4x4 identity_mtx = glm::mat4x4(1); // glm::mat4x4{ 1 };
+      //             // float rotation_euler = math::degrees(math::radians(areatrigger.boxYaw))._;
+      //             glm::rotate(identity_mtx, areatrigger.boxYaw, glm::vec3(0, 0, 1)); // rotate z
+      // 
+      //             Noggit::Rendering::Primitives::WireBox::getInstance(_world->_context).draw(model_view
+      //                 , projection
+      //                 , identity_mtx
+      //                 , color
+      //                 , areatrigger.getExtents()[0]// extents[0]
+      //                 , areatrigger.getExtents()[1] // + areatrigger.pos  // extents[1]
+      //             );
+      //         }
+      //     }
+      // }
+  }
+
   if (terrainMode == editing_mode::light)
   {
       Sky* CurrentSky = skies()->findClosestSkyByDistance(camera_pos);
@@ -941,7 +980,7 @@ void WorldRender::draw (glm::mat4x4 const& model_view
           if (CurrentSkyID == sky.Id)
               continue;
 
-          if (glm::distance(sky.pos, camera_pos) <= _cull_distance) // TODO: frustum cull here
+          if (glm::distance(sky.pos, camera_pos) <= _view_distance) // TODO: frustum cull here
           {
               glm::vec4 diffuse = { sky.colorFor(LIGHT_GLOBAL_DIFFUSE, CurrenTime), 1.f };
               glm::vec4 ambient = { sky.colorFor(LIGHT_GLOBAL_AMBIENT, CurrenTime), 1.f };
@@ -980,6 +1019,8 @@ void WorldRender::upload()
   }
 
   _skies = std::make_unique<Skies>(_world->mapIndex._map_id, _world->_context);
+
+  _area_triggers = std::make_unique<AreaTriggers>(_world->mapIndex._map_id, _world->_context);
 
   _outdoor_lighting = std::make_unique<OutdoorLighting>();
 

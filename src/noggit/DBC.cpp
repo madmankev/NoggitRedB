@@ -22,6 +22,7 @@ SoundAmbienceDB gSoundAmbienceDB;
 ZoneMusicDB gZoneMusicDB;
 ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 SoundEntriesDB gSoundEntriesDB;
+AreaTriggerDB gAreaTriggerDB;
 
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
 {
@@ -41,6 +42,7 @@ void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
   gZoneMusicDB.open(clientData);
   gZoneIntroMusicTableDB.open(clientData);
   gSoundEntriesDB.open(clientData);
+  gAreaTriggerDB.open(clientData);
 }
 
 

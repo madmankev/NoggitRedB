@@ -21,7 +21,9 @@ class AsyncObject;
 enum SceneObjectTypes
 {
   eMODEL,
-  eWMO
+  eWMO,
+  // eLIGHT,
+  // eAREATRIGGER
 };
 
 class MapTile;
