@@ -100,6 +100,7 @@ public:
                              , bool draw_wmo
                              , bool draw_models
                              , bool draw_hidden_models
+                             , bool do_area_triggers
                              );
 
   MapChunk* getChunkAt(glm::vec3 const& pos);
@@ -120,6 +121,7 @@ public:
   bool is_selected(std::uint32_t uid) const;
   std::vector<selection_type> const& current_selection() const { return _current_selection; }
   std::optional<selection_type> get_last_selected_model() const;
+  std::optional<selection_type> get_last_selected_object() const;
   bool has_selection() const { return !_current_selection.empty(); }
   bool has_multiple_model_selected() const { return _selected_model_count > 1; }
   int get_selected_model_count() const { return _selected_model_count; }

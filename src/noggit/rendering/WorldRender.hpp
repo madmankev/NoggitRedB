@@ -13,6 +13,7 @@
 #include <noggit/rendering/LiquidTextureManager.hpp>
 #include <noggit/map_horizon.h>
 #include <noggit/Sky.h>
+#include <noggit/AreaTrigger.h>
 
 #include <opengl/shader.hpp>
 #include <noggit/rendering/Primitives.hpp>
@@ -83,6 +84,8 @@ namespace Noggit::Rendering
 
     [[nodiscard]] std::unique_ptr<Skies>& skies() { return _skies; };
 
+    [[nodiscard]] std::unique_ptr<AreaTriggers>& areaTriggers() { return _area_triggers; };
+
   private:
 
     void drawMinimap ( MapTile *tile
@@ -123,6 +126,7 @@ namespace Noggit::Rendering
     std::unique_ptr<OutdoorLighting> _outdoor_lighting;
     OutdoorLightStats _outdoor_light_stats;
     std::unique_ptr<Skies> _skies;
+    std::unique_ptr<AreaTriggers> _area_triggers;
 
     // cursor
     Noggit::CursorRender _cursor_render;

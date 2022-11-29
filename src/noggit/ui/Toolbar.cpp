@@ -28,6 +28,7 @@ namespace Noggit
       add_tool_icon(editing_mode::light, tr("Light Editor"), FontNoggit::TOOL_LIGHT);
       add_tool_icon(editing_mode::scripting, tr("Scripting"), FontNoggit::INFO);
       add_tool_icon(editing_mode::chunk, tr("Chunk Manipulator"), FontNoggit::INFO);
+      add_tool_icon(editing_mode::areatrigger, tr("Area Triggers Editor"), FontNoggit::GIZMO_SCALE);
     }
 
     void toolbar::add_tool_icon(editing_mode mode, const QString& name, const FontNoggit::Icons& icon)

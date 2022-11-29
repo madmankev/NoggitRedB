@@ -6,10 +6,12 @@
 #include <string>
 #include <vector>
 #include <QString>
+// #include <noggit/AreaTrigger.h>
 
 
 class SceneObject;
 class MapChunk;
+class AreaTrigger;
 
 class Selectable
 {
@@ -40,12 +42,16 @@ struct selected_chunk_type : Selectable
 };
 
 using selected_object_type = SceneObject*;
-using selection_type = std::variant<selected_object_type, selected_chunk_type>;
+using selected_generic_object_type = AreaTrigger*;
+using selection_type = std::variant<selected_object_type, selected_chunk_type, selected_generic_object_type>;
 //! \note Keep in same order as variant!
 enum eSelectionEntryTypes
 {
   eEntry_Object,
-  eEntry_MapChunk
+  eEntry_MapChunk,
+  eArea_Trigger
+  // eLight,
+
 };
 
 using selection_entry = std::pair<float, selection_type>;

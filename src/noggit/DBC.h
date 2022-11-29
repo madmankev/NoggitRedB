@@ -278,6 +278,27 @@ public:
 
 };
 
+class AreaTriggerDB : public DBCFile
+{
+public:
+    AreaTriggerDB() :
+        DBCFile("DBFilesClient\\AreaTrigger.dbc")
+    { }
+
+    /// Fields
+    static const size_t ID = 0;        // uint
+    static const size_t ContinentId = 1;        // uint
+    static const size_t PositionX = 2;  // float
+    static const size_t PositionY = 3;  // float
+    static const size_t PositionZ = 4;  // float
+    static const size_t Radius = 5;  // float
+    static const size_t BoxLength = 6;  // float
+    static const size_t BoxWidth = 7;  // float
+    static const size_t BoxHeight = 8;  // float
+    static const size_t BoxYaw = 9;  // float
+
+};
+
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData);
 
 const char * getGroundEffectDoodad(unsigned int effectID, int DoodadNum);
@@ -298,3 +319,4 @@ extern SoundAmbienceDB gSoundAmbienceDB;
 extern ZoneMusicDB gZoneMusicDB;
 extern ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 extern SoundEntriesDB gSoundEntriesDB;
+extern AreaTriggerDB gAreaTriggerDB;
