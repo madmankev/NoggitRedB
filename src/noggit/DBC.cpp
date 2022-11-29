@@ -22,6 +22,9 @@ SoundAmbienceDB gSoundAmbienceDB;
 ZoneMusicDB gZoneMusicDB;
 ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 SoundEntriesDB gSoundEntriesDB;
+TaxiNodesDB gTaxiNodesDB;
+TaxiPathDB gTaxiPathDB;
+TaxiPathNodeDB gTaxiPathNodeDB;
 
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
 {
@@ -41,6 +44,9 @@ void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
   gZoneMusicDB.open(clientData);
   gZoneIntroMusicTableDB.open(clientData);
   gSoundEntriesDB.open(clientData);
+  gTaxiNodesDB.open(clientData);
+  gTaxiPathDB.open(clientData);
+  gTaxiPathNodeDB.open(clientData);
 }
 
 

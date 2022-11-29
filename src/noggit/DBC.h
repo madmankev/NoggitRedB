@@ -278,6 +278,64 @@ public:
 
 };
 
+class TaxiNodesDB : public DBCFile
+{
+public:
+    TaxiNodesDB() :
+        DBCFile("DBFilesClient\\TaxiNodes.dbc")
+    { }
+
+    /// Fields
+    static const size_t ID = 0;        // uint
+    static const size_t MapId = 1;        // uint
+    static const size_t PositionX = 2;        // float
+    static const size_t PositionY = 3;        // float
+    static const size_t PositionZ = 4;        // float
+    static const size_t Name = 5;        // loc string
+    static const size_t MountCreatureIdAlliance = 22;        // uint creature_template
+    static const size_t MountCreatureIdHorde = 23;        // uint
+
+};
+
+class TaxiPathDB : public DBCFile
+{
+public:
+    TaxiPathDB() :
+        DBCFile("DBFilesClient\\TaxiPath.dbc")
+    { }
+
+    /// Fields
+    static const size_t ID = 0;        // uint
+    static const size_t FromTaxiNode = 1;        // uint
+    static const size_t ToTaxiNode = 2;        // uint
+    static const size_t CopperCost = 3;        // uint
+
+};
+
+
+class TaxiPathNodeDB : public DBCFile
+{
+public:
+    TaxiPathNodeDB() :
+        DBCFile("DBFilesClient\\TaxiPathNode.dbc")
+    { }
+
+    /// Fields
+    static const size_t ID = 0;        // uint
+    static const size_t PathId = 1;        // uint TaxiPath.dbc
+    static const size_t NodeIndex = 2;        // uint
+    static const size_t ContinentId = 3;        // uint
+    static const size_t PositionX = 4;        // float
+    static const size_t PositionY = 5;        // float
+    static const size_t PositionZ = 6;        // float
+    static const size_t Flags = 7;        // uint
+    static const size_t Delay = 8;        // uint
+    static const size_t ArrivalEventId = 9;        // uint
+    static const size_t DepartureEventId = 10;        // uint
+
+
+};
+
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData);
 
 const char * getGroundEffectDoodad(unsigned int effectID, int DoodadNum);
@@ -298,3 +356,6 @@ extern SoundAmbienceDB gSoundAmbienceDB;
 extern ZoneMusicDB gZoneMusicDB;
 extern ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 extern SoundEntriesDB gSoundEntriesDB;
+extern TaxiNodesDB gTaxiNodesDB;
+extern TaxiPathDB gTaxiPathDB;
+extern TaxiPathNodeDB gTaxiPathNodeDB;
