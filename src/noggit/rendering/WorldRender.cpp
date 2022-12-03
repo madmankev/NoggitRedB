@@ -1270,6 +1270,7 @@ void WorldRender::unload()
   _square_render.unload();
   _cylinder_render.unload();
   _wirebox_render.unload();
+  _line_render.unload();
   _horizon_render.reset();
 
   _liquid_texture_manager.unload();

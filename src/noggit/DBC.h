@@ -380,6 +380,7 @@ extern SoundAmbienceDB gSoundAmbienceDB;
 extern ZoneMusicDB gZoneMusicDB;
 extern ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 extern SoundEntriesDB gSoundEntriesDB;
+extern WMOAreaTableDB gWMOAreaTableDB;
 extern TaxiNodesDB gTaxiNodesDB;
 extern TaxiPathDB gTaxiPathDB;
 extern TaxiPathNodeDB gTaxiPathNodeDB;
