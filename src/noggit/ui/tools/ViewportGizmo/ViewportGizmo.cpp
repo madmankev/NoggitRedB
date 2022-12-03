@@ -244,7 +244,9 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
         continue;
 
       obj_instance = std::get<selected_object_type>(selected);
-      NOGGIT_CUR_ACTION->registerObjectTransformed(obj_instance);
+      auto object_type = obj_instance->which();
+      if (object_type == (eMODEL || eWMO))
+        NOGGIT_CUR_ACTION->registerObjectTransformed(obj_instance);
 
       obj_instance->recalcExtents();
       object_matrix = obj_instance->transformMatrix();
@@ -255,7 +257,7 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
       glm::vec3& pos = obj_instance->pos;
       math::degrees::vec3& rotation = obj_instance->dir;
       float wmo_scale = 0.f;
-      float& scale = obj_instance->which() == eMODEL ? obj_instance->scale : wmo_scale;
+      float& scale = object_type == eMODEL ? obj_instance->scale : wmo_scale;
 
       glm::vec3 new_scale;
       glm::quat new_orientation;
@@ -273,7 +275,7 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
 
       new_orientation = glm::conjugate(new_orientation);
 
-      if (_world)
+      if (_world && object_type == (eMODEL || eWMO))
         _world->updateTilesEntry(selected, model_update::remove);
 
       switch (_gizmo_operation)
@@ -302,7 +304,7 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
       }
       obj_instance->recalcExtents();
 
-      if (_world)
+      if (_world && object_type == (eMODEL || eWMO))
         _world->updateTilesEntry(selected, model_update::add);
     }
   }

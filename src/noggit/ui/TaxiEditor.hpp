@@ -28,23 +28,23 @@
 class MapView;
 
 
-class TaxiPathNode : SceneObject
+class TaxiPathNode : public SceneObject
 {
 public:
     TaxiPathNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context);
 
-    TaxiPathNode(TaxiPathNode&& other)
-        : SceneObject(other._type, other._context)
-    {
-        std::swap(extents, other.extents);
-        pos = other.pos;
-        dir = other.dir;
-        _context = other._context;
-        uid = other.uid;
-
-        _transform_mat = other._transform_mat;
-        _transform_mat_inverted = other._transform_mat_inverted;
-    }
+    // TaxiPathNode(TaxiPathNode&& other)
+    //     : SceneObject(other._type, other._context)
+    // {
+    //     std::swap(extents, other.extents);
+    //     pos = other.pos;
+    //     dir = other.dir;
+    //     _context = other._context;
+    //     uid = other.uid;
+    // 
+    //     _transform_mat = other._transform_mat;
+    //     _transform_mat_inverted = other._transform_mat_inverted;
+    // }
 
     void intersect(math::ray const& ray, selection_result* results);
     // glm::vec3 Position;

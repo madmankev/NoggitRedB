@@ -207,6 +207,8 @@ TaxiNode::TaxiNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context)
     _context = context;
     scale = 5.0f;
 
+    recalcExtents();
+
     updateTransformMatrix();
 
     // store all paths that start from this node
@@ -369,6 +371,8 @@ TaxiPathNode::TaxiPathNode(DBCFile::Iterator data, Noggit::NoggitRenderContext c
     _context = context;
     scale = 4.0f;
 
+    recalcExtents();
+
     updateTransformMatrix();
 }
 
@@ -379,7 +383,7 @@ void TaxiPathNode::intersect(math::ray const& ray, selection_result* results)
     // very simple bound intersect (square) TODO : sphere intersect
     if (bounds_intersect.has_value())
     {
-        // results->emplace_back(bounds_intersect.value(), this);
+        results->emplace_back(bounds_intersect.value(), this);
     }
 }
 

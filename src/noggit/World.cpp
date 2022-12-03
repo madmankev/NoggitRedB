@@ -532,6 +532,7 @@ void World::reset_selection()
   _current_selection.clear();
   _multi_select_pivot = std::nullopt;
   _selected_model_count = 0;
+  renderer()->setSelectedPathNode(nullptr);
 }
 
 void World::delete_selected_models()

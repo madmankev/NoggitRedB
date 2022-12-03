@@ -1004,7 +1004,7 @@ void WorldRender::draw (glm::mat4x4 const& model_view
               //         }
               // 
               //         // draw path node sphere
-              //         if (glm::distance(path_node.position(), camera_pos) <= _cull_distance) // TODO: frustum cull here
+              //         if (glm::distance(path_node.position(), camera_pos) <= _cull_distance)
               //         {
               //             glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.f };// orange
               // 
@@ -1017,19 +1017,39 @@ void WorldRender::draw (glm::mat4x4 const& model_view
       }
       if (_taxi_path != nullptr)
       {
+          glm::vec3 last_pos(0.0f);
+          std::vector<glm::vec3> line_vertices;
+
           for (auto& path_node : _taxi_path->PathNodes)
           {
-            // if (glm::distance(path_node.position(), camera_pos) <= _cull_distance) // use distance check or not ?
-            {
+            // if (glm::distance(path_node.position(), camera_pos) <= _cull_distance) // use distance check or not ? rendering them from far away could be nice
+            // {
+              line_vertices.push_back(path_node.position());
+                if (last_pos != glm::vec3(0.0f))
+                {
+                    // draw line from last node
+                    _line_render.draw(mvp, last_pos, path_node.position(), { 1.0f, 0.0f, 0.0f, 0.8f });
+                    // line_vertices.clear();
+                    // line_vertices.push_back(last_pos);
+                    // line_vertices.push_back(path_node.position());
+                    // _line_render.draw(mvp, line_vertices.front(), line_vertices.back(), { 1.0f, 0.0f, 0.0f, 0.8f });
+                    // last_pos = path_node.position();
+                }
+
                 bool draw_wireframe = false;
                 if (&path_node == _selected_taxi_path_node)
-                    draw_wireframe = true;
+                    _wirebox_render.draw(model_view, projection, glm::mat4x4{ 1 }, { 1.0f, 1.0f, 1.0f, 1.0f }, path_node.extents[0], path_node.extents[1]);
+                    // draw_wireframe = true;
 
-                glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.f };// orange
+                glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.0f };// orange
          
                 _sphere_render.draw(mvp, path_node.position(), color, 4.0f, 32, 18, 0.8f, false, draw_wireframe);
-            }
+            // }
+                last_pos = path_node.position();
+
+                line_vertices.push_back(path_node.position());
           }
+          // _line_render.draw(mvp, line_vertices.front(), line_vertices.back(), { 1.0f, 0.0f, 0.0f, 0.8f });
       }
       // if (_selected_taxi_path_node != nullptr)
       // {
@@ -1279,8 +1299,6 @@ void WorldRender::unload()
 
   _buffers.unload();
   _vertex_arrays.unload();
-
-  Noggit::Rendering::Primitives::WireBox::getInstance(_world->_context).unload();
 }
 
 

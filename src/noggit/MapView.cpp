@@ -4155,6 +4155,8 @@ void MapView::doSelection (bool selectTerrainOnly, bool mouseMove)
     {
         _world->reset_selection();
         _world->add_to_selection(hit);
+        auto path_node = static_cast<TaxiPathNode*>(std::get<selected_object_type>(hit));
+        _world->renderer()->setSelectedPathNode(path_node);
     }
 
     auto action = NOGGIT_CUR_ACTION;
