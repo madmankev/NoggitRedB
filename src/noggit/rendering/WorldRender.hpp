@@ -141,7 +141,6 @@ namespace Noggit::Rendering
     Noggit::CursorRender _cursor_render;
     Noggit::Rendering::Primitives::Sphere _sphere_render;
     Noggit::Rendering::Primitives::Square _square_render;
-    Noggit::Rendering::Primitives::Cylinder _cylinder_render;
     Noggit::Rendering::Primitives::WireBox _wirebox_render;
     Noggit::Rendering::Primitives::Line _line_render;
 
