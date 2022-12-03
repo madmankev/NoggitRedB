@@ -13,6 +13,7 @@
 #include <noggit/rendering/LiquidTextureManager.hpp>
 #include <noggit/map_horizon.h>
 #include <noggit/Sky.h>
+#include <noggit/ui/TaxiEditor.hpp>
 
 #include <opengl/shader.hpp>
 #include <noggit/rendering/Primitives.hpp>
@@ -83,6 +84,14 @@ namespace Noggit::Rendering
 
     [[nodiscard]] std::unique_ptr<Skies>& skies() { return _skies; };
 
+    [[nodiscard]] std::shared_ptr<Taxis>& taxis() { return _taxis; };
+
+    void setTaxiPath(TaxiPath* taxi_path);
+
+    TaxiPath* selectedTaxiPath() { return _taxi_path; };
+
+    void setSelectedPathNode(TaxiPathNode* taxi_path_node);
+
   private:
 
     void drawMinimap ( MapTile *tile
@@ -123,12 +132,17 @@ namespace Noggit::Rendering
     std::unique_ptr<OutdoorLighting> _outdoor_lighting;
     OutdoorLightStats _outdoor_light_stats;
     std::unique_ptr<Skies> _skies;
+    std::shared_ptr<Taxis> _taxis;
+    // std::unique_ptr<TaxiPath> _taxi_path;
+    TaxiPath* _taxi_path = nullptr; // vector for multiple maybe
+    TaxiPathNode* _selected_taxi_path_node = nullptr;
 
     // cursor
     Noggit::CursorRender _cursor_render;
     Noggit::Rendering::Primitives::Sphere _sphere_render;
     Noggit::Rendering::Primitives::Square _square_render;
     Noggit::Rendering::Primitives::Cylinder _cylinder_render;
+    Noggit::Rendering::Primitives::WireBox _wirebox_render;
 
     // buffers
     OpenGL::Scoped::deferred_upload_buffers<8> _buffers;

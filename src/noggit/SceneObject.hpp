@@ -21,7 +21,9 @@ class AsyncObject;
 enum SceneObjectTypes
 {
   eMODEL,
-  eWMO
+  eWMO,
+  eTaxi_Node,
+  eTaxi_Path_Node
 };
 
 class MapTile;

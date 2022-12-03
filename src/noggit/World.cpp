@@ -796,6 +796,7 @@ selection_result World::intersect (glm::mat4x4 const& model_view
                                   , bool draw_wmo
                                   , bool draw_models
                                   , bool draw_hidden_models
+                                  , bool do_taxi_nodes
                                   )
 {
   ZoneScopedN("World::intersect()");
@@ -852,6 +853,16 @@ selection_result World::intersect (glm::mat4x4 const& model_view
         }
       });
     }
+  }
+
+  if (!pOnlyMap && do_taxi_nodes)
+  {
+      ZoneScopedN("World::intersect() : intersect Taxi path nodes");
+      if (_renderer.selectedTaxiPath() != nullptr)
+        for (auto& pathnode : _renderer.selectedTaxiPath()->PathNodes)
+        {
+            pathnode.intersect(ray, &results);
+        }
   }
 
   return std::move(results);

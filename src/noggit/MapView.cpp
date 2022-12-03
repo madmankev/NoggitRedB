@@ -4052,6 +4052,7 @@ selection_result MapView::intersect_result(bool terrain_only)
     , _draw_wmo.get()
     , _draw_models.get()
     , _draw_hidden_models.get()
+    , terrainMode == editing_mode::taxi
     )
   );
 
@@ -4133,6 +4134,11 @@ void MapView::doSelection (bool selectTerrainOnly, bool mouseMove)
     {
       _world->reset_selection();
       _world->add_to_selection(hit);
+    }
+    else if (terrainMode == editing_mode::taxi)
+    {
+        _world->reset_selection();
+        _world->add_to_selection(hit);
     }
 
     auto action = NOGGIT_CUR_ACTION;
@@ -5109,6 +5115,10 @@ void MapView::mouseReleaseEvent (QMouseEvent* event)
         }
         
         _area_selection->hide();
+    }
+    else if (terrainMode == editing_mode::taxi)
+    {
+        doSelection(false);
     }
     else 
     {
