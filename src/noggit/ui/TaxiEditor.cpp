@@ -2,6 +2,7 @@
 #include "TaxiEditor.hpp"
 #include <cmath>
 #include <noggit/Selection.h>
+#include <limits> 
 
 #include <noggit/DBC.h>
 #include <noggit/Log.h>
@@ -19,13 +20,29 @@ namespace Noggit
           , _taxi_nodes_tree(new QTreeWidget())
           , mapID(map_view->getWorld()->getMapID())
           , _map_view(map_view)
+          // , _path_node_editor_widget(map_view, this)
     {
           auto layout = new QFormLayout(this);
+          _path_node_editor_widget = new TaxiPathNodeEditor(map_view, this);
+
+          _node_filter_type = new QComboBox(this);
+          _node_filter_type->setCurrentIndex(0);
+          _node_filter_type->addItem("Show All");
+          _node_filter_type->addItem("Show Taxis");
+          _node_filter_type->addItem("Show Transports");
+
+          _path_filter_direction = new QComboBox(this);
+          _path_filter_direction->setCurrentIndex(0);
+          _path_filter_direction->addItem("Paths that start from this node");
+          _path_filter_direction->addItem("Paths that end at this node");
+
           _taxi_nodes_tree->setHeaderLabel("Taxi Nodes.\n Children are taxi paths destinations.");
           _taxi_nodes_tree->setSelectionMode(QAbstractItemView::SingleSelection);
           buildTaxiNodesList();
           // auto layout = new QVBoxLayout(this);
 
+          layout->addRow("Filter node type:", _node_filter_type);
+          layout->addRow("Filter paths:", _path_filter_direction);
           layout->addRow(_taxi_nodes_tree);
 
 
@@ -73,6 +90,9 @@ namespace Noggit
           {
               if (i->getInt(TaxiNodesDB::MapId) == mapID)
               {
+
+                  //if (_node_filter_type->currentIndex() == 0 && )
+
                   add_taxi_node_item(i->getInt(TaxiNodesDB::ID));
               }
           }
@@ -87,29 +107,31 @@ namespace Noggit
           // add paths with this node as the "FROM" as children
           for (DBCFile::Iterator i = gTaxiPathDB.begin(); i != gTaxiPathDB.end(); ++i)
           {
-              if (i->getInt(TaxiPathDB::FromTaxiNode) == node_id)
+              if (_path_filter_direction->currentIndex() == 0 && i->getInt(TaxiPathDB::FromTaxiNode) != node_id)
+                  continue;
+              if (_path_filter_direction->currentIndex() == 1 && i->getInt(TaxiPathDB::ToTaxiNode) != node_id)
+                  continue;
+
+              int pathid = i->getInt(TaxiPathDB::ID);// debug
+              // auto taxipath_rec = gTaxiPathDB.getByID(i->getInt(TaxiPathDB::ID));
+
+              if (i->getInt(TaxiPathDB::ToTaxiNode) == -1)
+                  continue; // some have -1, figure out wat it's for
+
+              try
               {
-                  int pathid = i->getInt(TaxiPathDB::ID);// debug
-                  // auto taxipath_rec = gTaxiPathDB.getByID(i->getInt(TaxiPathDB::ID));
+                auto destnode_rec = gTaxiNodesDB.getByID(i->getInt(TaxiPathDB::ToTaxiNode));
+                // QTreeWidgetItem* path_item = add_area(parent_area_id);
+                QTreeWidgetItem* path_item = new QTreeWidgetItem();
 
-                  if (i->getInt(TaxiPathDB::ToTaxiNode) == -1)
-                      continue; // some have -1, figure out wat it's for
+                path_item->setData(0, 1, QVariant(i->getInt(TaxiPathDB::ID))); // Store the path id in the item
+                path_item->setText(0, QString(destnode_rec.getLocalizedString(TaxiNodesDB::Name)));
 
-                  try
-                  {
-                    auto destnode_rec = gTaxiNodesDB.getByID(i->getInt(TaxiPathDB::ToTaxiNode));
-                    // QTreeWidgetItem* path_item = add_area(parent_area_id);
-                    QTreeWidgetItem* path_item = new QTreeWidgetItem();
-
-                    path_item->setData(0, 1, QVariant(i->getInt(TaxiPathDB::ID))); // Store the path id in the item
-                    path_item->setText(0, QString(destnode_rec.getLocalizedString(TaxiNodesDB::Name)));
-
-                    item->addChild(path_item);
-                    path_count++;
-                  }
-                  catch (TaxiNodesDB::NotFound)
-                  {
-                  }
+                item->addChild(path_item);
+                path_count++;
+              }
+              catch (TaxiNodesDB::NotFound)
+              {
               }
           }
           std::stringstream ss;
@@ -169,6 +191,58 @@ namespace Noggit
           _map_view->getWorld()->renderer()->setTaxiPath(nullptr);
           return current_path;
       }
+
+      void TaxiEditor::taxi_path_node_selected(TaxiPathNode* path_node)
+      {
+          _map_view->getWorld()->renderer()->setSelectedPathNode(path_node);
+
+          _path_node_editor_widget->LoadPathNode(path_node);
+          _path_node_editor_widget->show();
+      }
+
+      TaxiPathNodeEditor::TaxiPathNodeEditor(MapView* map_view, QWidget* parent)
+          : QWidget(parent)
+          , _map_view(map_view)
+      {
+          setWindowTitle("Path Node Editor");
+          setWindowFlags(Qt::Tool | Qt::WindowStaysOnTopHint);
+
+          auto layout = new QFormLayout(this);
+
+          _id_spinbox = new QSpinBox(this);
+          _id_spinbox->setMaximum(std::numeric_limits<std::int32_t>::max());
+          _id_spinbox->setDisabled(true);
+          _id_node_spinbox = new QSpinBox(this);
+          _id_node_spinbox->setMaximum(std::numeric_limits<std::int32_t>::max());
+          _id_node_spinbox->setDisabled(true);
+
+          _delay_spinbox = new QSpinBox(this); // Only display it for transports ? no idea if it even works for taxis.
+          _delay_spinbox->setMaximum(360000); // in seconds
+
+          _script_arrival_spinbox = new QSpinBox(this);
+          _script_arrival_spinbox->setMaximum(std::numeric_limits<std::int32_t>::max());
+          _script_departure_spinbox = new QSpinBox(this);
+          _script_departure_spinbox->setMaximum(std::numeric_limits<std::int32_t>::max());
+
+          layout->addRow("TaxiPathNode.dbc Id:", _id_spinbox);
+          layout->addRow("Node Id:", _id_node_spinbox);
+          layout->addRow("Delay (in seconds):", _delay_spinbox);
+          layout->addRow("Arrival server script Id:", _script_arrival_spinbox);
+          layout->addRow("Departure server script Id:", _script_departure_spinbox);
+      }
+
+      void TaxiPathNodeEditor::LoadPathNode(TaxiPathNode* path_node)
+      {
+          _curr_path_node = path_node;
+          if (path_node != nullptr)
+          {
+            _id_spinbox->setValue(path_node->Id);
+            _id_node_spinbox->setValue(path_node->NodeIndex);
+            _delay_spinbox->setValue(path_node->Delay);
+            _script_arrival_spinbox->setValue(path_node->ArrivalEventId);
+            _script_departure_spinbox->setValue(path_node->DepartureEventId);
+          }
+      }
   }
 }
 
@@ -187,7 +261,8 @@ Taxis::Taxis(unsigned int mapid, Noggit::NoggitRenderContext context)
 }
 
 TaxiNode::TaxiNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context)
-    : SceneObject(SceneObjectTypes::eTaxi_Node, context)
+    // : SceneObject(SceneObjectTypes::eTaxi_Node, context)
+    : GenericSelectableObject(GenericObjectTypes::Taxi_Node, Sphere, context)
 {
     Id = data->getInt(TaxiNodesDB::ID);
     MapId = data->getInt(TaxiNodesDB::MapId);
@@ -211,6 +286,7 @@ TaxiNode::TaxiNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context)
 
     updateTransformMatrix();
 
+    bool is_transport = false;
     // store all paths that start from this node
     for (DBCFile::Iterator i = gTaxiPathDB.begin(); i != gTaxiPathDB.end(); ++i)
     {
@@ -219,8 +295,17 @@ TaxiNode::TaxiNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context)
             //  TaxiPath taxiPath(i);
             // auto taxiPath = new TaxiPath(i);
             taxiPaths.emplace_back(i, context);
+            if (i->getInt(TaxiPathDB::CopperCost) == 0)
+                is_transport = true;
         }
     }
+
+    // TODO : figure out the best way to determine if it is a transport or a taxi.
+    // Typically transport nodes have location = 0,0,0, but not always
+    // they never have a mount creature set, but a few "taxi" nodes don't either.
+    // they only have 1 path and it costs 0 gold.
+    // they're named "Transport, ..."
+    taxiNodeType = is_transport ? Transport : Taxi;
 }
 
 void TaxiNode::draw(glm::mat4x4 mvp, glm::vec3 camera_pos, float cull_distance)
@@ -353,7 +438,8 @@ void TaxiPath::drawPathNodes(glm::mat4x4 mvp, glm::vec3 camera_pos, float cull_d
 }
 
 TaxiPathNode::TaxiPathNode(DBCFile::Iterator data, Noggit::NoggitRenderContext context)
-    : SceneObject(SceneObjectTypes::eTaxi_Node, context)
+    // : SceneObject(SceneObjectTypes::eTaxi_Node, context)
+    : GenericSelectableObject(GenericObjectTypes::Taxi_Path_Node, Sphere, context)
 {
     Id = data->getInt(TaxiPathNodeDB::ID);
     // int PathId; // TaxiPath Id

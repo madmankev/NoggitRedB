@@ -78,3 +78,37 @@ void SceneObject::derefTile(MapTile* tile)
   if (it != _tiles.end())
     _tiles.erase(it);
 }
+
+GenericSelectableObject::GenericSelectableObject(GenericObjectTypes type, GenericSelectableShape shape, Noggit::NoggitRenderContext context)
+    : _type(type)
+    , _context(context)
+    , pos(0.f, 0.f, 0.f)
+    , dir(0.f, 0.f, 0.f)
+    , _shape(shape)
+{
+    // min and max initialized to their opposites
+    extents[0] = glm::vec3(std::numeric_limits<float>::max());
+    extents[1] = glm::vec3(std::numeric_limits<float>::lowest());
+}
+
+bool GenericSelectableObject::isInsideRect(std::array<glm::vec3, 2> const* rect) const
+{
+    return misc::rectOverlap(extents.data(), rect->data());
+}
+
+void GenericSelectableObject::updateTransformMatrix()
+{
+    auto matrix = glm::mat4x4(1);
+    matrix = glm::translate(matrix, pos);
+    matrix = matrix * glm::eulerAngleYZX(glm::radians(dir.y - math::degrees(90.0)._), glm::radians(-dir.x), glm::radians(dir.z));
+    matrix = glm::scale(matrix, glm::vec3(scale, scale, scale));
+
+    _transform_mat = matrix;
+    _transform_mat_inverted = glm::inverse(matrix);
+}
+
+void GenericSelectableObject::resetDirection()
+{
+    dir = math::degrees::vec3(math::degrees(0)._, dir.y, math::degrees(0)._);
+    recalcExtents();
+}

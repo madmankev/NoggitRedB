@@ -26,7 +26,8 @@ namespace Noggit
         {
             MODEL,
             WMO,
-            MULTISELECTION
+            MULTISELECTION,
+            GENERIC_SELECTABLE
         };
 
         // This class is intended to be used by QOpenGLWidget presenting an ImGui drawing context.

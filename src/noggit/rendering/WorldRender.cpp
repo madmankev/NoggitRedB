@@ -983,81 +983,47 @@ void WorldRender::draw (glm::mat4x4 const& model_view
           {
               glm::vec4 color = { 0.0f, 1.0f, 0.0f, 1.f }; // green
           
-              _sphere_render.draw(mvp, taxi_node.position(), color, 8.0f, 32, 18, 0.8f, false, false);
+              _sphere_render.draw(mvp, taxi_node.position(), color, 4.0f, 32, 18, 0.5f, false, false);
           
-              // draw path nodes
-              //for (TaxiPath& path : taxi_node.taxiPaths)
-              //{
-              //    path.drawPathNodes(mvp, camera_pos, _cull_distance);
-              //}
-          
-              // for (TaxiPath& path : taxi_node.taxiPaths)
-              // {
-              //     glm::vec3 last_pos(0.0f);
-              //     for (auto& path_node : path.PathNodes)
-              //     {
-              //         
-              //         // _world->renderer()
-              //         if (last_pos != glm::vec3(0.0f))
-              //         {
-              //             // draw line
-              //         }
-              // 
-              //         // draw path node sphere
-              //         if (glm::distance(path_node.position(), camera_pos) <= _cull_distance)
-              //         {
-              //             glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.f };// orange
-              // 
-              //             _sphere_render.draw(mvp, path_node.position(), color, 4.0f, 32, 18, 0.8f, false, false);
-              //         }
-              //         last_pos = path_node.position();
-              //     }
-              // }
           }
       }
       if (_taxi_path != nullptr)
       {
-          glm::vec3 last_pos(0.0f);
           std::vector<glm::vec3> line_vertices;
 
           for (auto& path_node : _taxi_path->PathNodes)
           {
+              if (path_node.MapId != _world->getMapID())
+              {
+                  auto last_pos = line_vertices.back();
+                  // TODO render map changes somehow
+                    // big blue sphere at last node?
+                  _sphere_render.draw(mvp, path_node.position(), {0.0f, 0.0f, 1.0f, 1.0f}, 4.0f, 32, 18, 0.6f, false, false); 
+                  break; // is it possible 
+              }
+
             // if (glm::distance(path_node.position(), camera_pos) <= _cull_distance) // use distance check or not ? rendering them from far away could be nice
-            // {
               line_vertices.push_back(path_node.position());
-                if (last_pos != glm::vec3(0.0f))
-                {
-                    // draw line from last node
-                    _line_render.draw(mvp, last_pos, path_node.position(), { 1.0f, 0.0f, 0.0f, 0.8f });
-                    // line_vertices.clear();
-                    // line_vertices.push_back(last_pos);
-                    // line_vertices.push_back(path_node.position());
-                    // _line_render.draw(mvp, line_vertices.front(), line_vertices.back(), { 1.0f, 0.0f, 0.0f, 0.8f });
-                    // last_pos = path_node.position();
-                }
 
                 bool draw_wireframe = false;
                 if (&path_node == _selected_taxi_path_node)
-                    _wirebox_render.draw(model_view, projection, glm::mat4x4{ 1 }, { 1.0f, 1.0f, 1.0f, 1.0f }, path_node.extents[0], path_node.extents[1]);
+                    _wirebox_render.draw(model_view, projection, glm::mat4x4{ 1 }, { 1.0f, 1.0f, 1.0f, 1.0f },
+                        path_node.extents[0] + (path_node.scale * 0.2f),
+                        path_node.extents[1] - (path_node.scale * 0.2f)); // make the square a bit smaller than the sphere becasue it looks better
                     // draw_wireframe = true;
 
                 glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.0f };// orange
          
                 _sphere_render.draw(mvp, path_node.position(), color, 4.0f, 32, 18, 0.8f, false, draw_wireframe);
-            // }
-                last_pos = path_node.position();
 
-                line_vertices.push_back(path_node.position());
           }
-          // _line_render.draw(mvp, line_vertices.front(), line_vertices.back(), { 1.0f, 0.0f, 0.0f, 0.8f });
+          _line_render.draw(mvp, line_vertices, { 1.0f, 0.0f, 0.0f, 0.8f });
       }
       // if (_selected_taxi_path_node != nullptr)
       // {
       //     
       // }
   }
-
-
 }
 
 void WorldRender::upload()

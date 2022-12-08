@@ -89,4 +89,65 @@ protected:
   std::vector<MapTile*> _tiles;
 };
 
+enum GenericObjectTypes
+{
+	Taxi_Node,
+	Taxi_Path_Node,
+	Light,
+	Area_Trigger
+};
+
+enum GenericSelectableShape
+{
+	Sphere,
+	Box
+};
+
+class GenericSelectableObject : public Selectable
+{
+public:
+	GenericSelectableObject(GenericObjectTypes type, GenericSelectableShape shape, Noggit::NoggitRenderContext context);
+
+	[[nodiscard]]
+	bool isInsideRect(std::array<glm::vec3, 2> const* rect) const;
+
+	virtual void updateTransformMatrix();
+
+	virtual void recalcExtents() = 0;
+	virtual void ensureExtents() = 0;
+
+	void resetDirection();
+
+	[[nodiscard]]
+	glm::mat4x4 transformMatrix() const { return _transform_mat; };
+
+	[[nodiscard]]
+	glm::mat4x4 transformMatrixInverted() const { return _transform_mat_inverted; };
+
+	[[nodiscard]]
+	GenericObjectTypes which() const { return _type; };
+
+	[[nodiscard]]
+	GenericSelectableShape shape() const { return _shape; };
+
+	[[nodiscard]]
+	std::array<glm::vec3, 2> const& getExtents() { ensureExtents(); return extents; }
+
+public:
+	glm::vec3 pos;
+	std::array<glm::vec3, 2> extents;
+	glm::vec3 dir;
+	float scale = 1.f;
+	// int frame;
+
+protected:
+	GenericObjectTypes _type;
+	GenericSelectableShape _shape;
+
+	glm::mat4x4 _transform_mat = glm::mat4x4();
+	glm::mat4x4 _transform_mat_inverted = glm::mat4x4();
+
+	Noggit::NoggitRenderContext _context;
+};
+
 #endif //NOGGIT_3DOBJECT_HPP

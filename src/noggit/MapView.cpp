@@ -300,7 +300,9 @@ void MapView::set_editing_mode(editing_mode mode)
 void MapView::setToolPropertyWidgetVisibility(editing_mode mode)
 {
   _tool_panel_dock->setCurrentIndex(static_cast<int>(mode));
-
+  _viewport_overlay_ui->gizmoRotateButton->setVisible(true);
+  _viewport_overlay_ui->gizmoScaleButton->setVisible(true);
+  updateGizmoOverlay(ImGuizmo::OPERATION::TRANSLATE);
   switch (mode)
   {
 
@@ -313,6 +315,13 @@ void MapView::setToolPropertyWidgetVisibility(editing_mode mode)
     _texture_browser_dock->setVisible(!ui_hidden && _settings->value("map_view/texture_browser", false).toBool());
     _texture_palette_dock->setVisible(!ui_hidden && _settings->value("map_view/texture_palette", false).toBool());
     break;
+  case editing_mode::light:
+      _viewport_overlay_ui->gizmoBar->setVisible(!ui_hidden);
+      _viewport_overlay_ui->gizmoRotateButton->setVisible(false);
+  case editing_mode::taxi:
+      _viewport_overlay_ui->gizmoBar->setVisible(!ui_hidden);
+      _viewport_overlay_ui->gizmoRotateButton->setVisible(false);
+      _viewport_overlay_ui->gizmoScaleButton->setVisible(false);
   default:
     break;
   }
@@ -1043,6 +1052,17 @@ void MapView::updateDetailInfos(bool no_sel_change_check)
             chunk_sel.updateDetails(guidetailInfos);
           }
           break;
+        }
+        case eGeneric_Selectable:
+        {
+            auto obj = std::get<selected_generic_object_type>(last_selection);
+
+            if (no_sel_change_check || reinterpret_cast<std::uintptr_t>(obj) != last_sel || NOGGIT_CUR_ACTION)
+            {
+                last_sel = reinterpret_cast<std::uintptr_t>(obj);
+                obj->updateDetails(guidetailInfos);
+            }
+            break;
         }
       }
     }
@@ -4155,17 +4175,35 @@ void MapView::doSelection (bool selectTerrainOnly, bool mouseMove)
     {
         _world->reset_selection();
         _world->add_to_selection(hit);
-        auto path_node = static_cast<TaxiPathNode*>(std::get<selected_object_type>(hit));
-        _world->renderer()->setSelectedPathNode(path_node);
+        auto path_node = static_cast<TaxiPathNode*>(std::get<selected_generic_object_type>(hit));
+        taxiEditor->taxi_path_node_selected(path_node);
     }
 
     auto action = NOGGIT_CUR_ACTION;
 
     if (!action || (!action->getBlockCursor()) || !_locked_cursor_mode.get())
     {
+
+        switch (hit.index())
+        {
+        case eEntry_Object:
+            _cursor_pos = std::get<selected_object_type>(hit)->pos;
+            break;
+        case eEntry_MapChunk:
+            _cursor_pos = std::get<selected_chunk_type>(hit).position;
+            break;
+        case eGeneric_Selectable:
+            _cursor_pos = std::get<selected_generic_object_type>(hit)->pos;
+            break;
+        default:
+            throw std::logic_error("bad variant");
+            break;
+        }
+        /*
       _cursor_pos = hit.index() == eEntry_Object ? std::get<selected_object_type>(hit)->pos
                                                  : hit.index() == eEntry_MapChunk ? std::get<selected_chunk_type>(hit).position
-                                                                                  : throw std::logic_error("bad variant");
+                                                                       : throw std::logic_error("bad variant");
+        */    
     }
 
   }
