@@ -1017,7 +1017,7 @@ void WorldRender::draw (glm::mat4x4 const& model_view
                 _sphere_render.draw(mvp, path_node.position(), color, 4.0f, 32, 18, 0.8f, false, draw_wireframe);
 
           }
-          _line_render.draw(mvp, line_vertices, { 1.0f, 0.0f, 0.0f, 0.8f });
+          _line_render.draw(mvp, line_vertices, { 1.0f, 0.0f, 0.0f, 0.8f }, true);
       }
       // if (_selected_taxi_path_node != nullptr)
       // {
