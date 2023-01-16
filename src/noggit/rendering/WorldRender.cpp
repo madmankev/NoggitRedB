@@ -961,6 +961,69 @@ void WorldRender::draw (glm::mat4x4 const& model_view
           _sphere_render.draw(mvp, CurrentSky->pos, diffuse, CurrentSky->r2, 32, 18, alpha_light_sphere, false, draw_wireframe_light_sphere);
       }
   }
+
+  if (terrainMode == editing_mode::taxi)
+  {
+      // gl.disable(GL_BLEND);
+      gl.disable(GL_CULL_FACE);
+      // gl.depthMask(GL_FALSE);
+      // glCullFace(GL_BACK);
+      for (auto& taxi_node : taxis()->taxiNodes) // _taxis.get()->taxiNodes
+      {
+          // TODO : can't use _sphere_render in the taxi classes for some reason
+
+          // taxi_node.draw(mvp, camera_pos, _cull_distance);
+          // 
+          // for (TaxiPath& path : taxi_node.taxiPaths)
+          // {
+          //     path.drawPathNodes(mvp, camera_pos, _cull_distance);
+          // }
+
+          if (glm::distance(taxi_node.position(), camera_pos) <= _cull_distance)
+          {
+              glm::vec4 color = { 0.0f, 1.0f, 0.0f, 1.f }; // green
+          
+              _sphere_render.draw(mvp, taxi_node.position(), color, 4.0f, 32, 18, 0.5f, false, false);
+          
+          }
+      }
+      if (_taxi_path != nullptr)
+      {
+          std::vector<glm::vec3> line_vertices;
+
+          for (auto& path_node : _taxi_path->PathNodes)
+          {
+              if (path_node.MapId != _world->getMapID())
+              {
+                  auto last_pos = line_vertices.back();
+                  // TODO render map changes somehow
+                    // big blue sphere at last node?
+                  _sphere_render.draw(mvp, path_node.position(), {0.0f, 0.0f, 1.0f, 1.0f}, 4.0f, 32, 18, 0.6f, false, false); 
+                  break; // is it possible 
+              }
+
+            // if (glm::distance(path_node.position(), camera_pos) <= _cull_distance) // use distance check or not ? rendering them from far away could be nice
+              line_vertices.push_back(path_node.position());
+
+                bool draw_wireframe = false;
+                if (&path_node == _selected_taxi_path_node)
+                    _wirebox_render.draw(model_view, projection, glm::mat4x4{ 1 }, { 1.0f, 1.0f, 1.0f, 1.0f },
+                        path_node.extents[0] + (path_node.scale * 0.2f),
+                        path_node.extents[1] - (path_node.scale * 0.2f)); // make the square a bit smaller than the sphere becasue it looks better
+                    // draw_wireframe = true;
+
+                glm::vec4 color = { 1.0f, 0.5f, 0.0f, 1.0f };// orange
+         
+                _sphere_render.draw(mvp, path_node.position(), color, 4.0f, 32, 18, 0.8f, false, draw_wireframe);
+
+          }
+          _line_render.draw(mvp, line_vertices, { 1.0f, 0.0f, 0.0f, 0.8f }, true);
+      }
+      // if (_selected_taxi_path_node != nullptr)
+      // {
+      //     
+      // }
+  }
 }
 
 void WorldRender::upload()
@@ -982,6 +1045,8 @@ void WorldRender::upload()
   _skies = std::make_unique<Skies>(_world->mapIndex._map_id, _world->_context);
 
   _outdoor_lighting = std::make_unique<OutdoorLighting>();
+
+  _taxis = std::make_shared<Taxis>(_world->mapIndex._map_id, _world->_context);
 
   _m2_program.reset
     ( new OpenGL::program
@@ -1189,6 +1254,7 @@ void WorldRender::unload()
   _cursor_render.unload();
   _sphere_render.unload();
   _square_render.unload();
+  _wirebox_render.unload();
   _line_render.unload();
   _horizon_render.reset();
 
@@ -1515,6 +1581,16 @@ void WorldRender::setupOccluderBuffers()
     gl.bufferData (GL_ELEMENT_ARRAY_BUFFER, 36 * sizeof(std::uint16_t), indices.data(), GL_STATIC_DRAW);
   }
 
+}
+
+void Noggit::Rendering::WorldRender::setTaxiPath(TaxiPath* taxi_path)
+{
+    _taxi_path = taxi_path;
+}
+
+void Noggit::Rendering::WorldRender::setSelectedPathNode(TaxiPathNode* taxi_path_node)
+{
+    _selected_taxi_path_node = taxi_path_node;
 }
 
 void WorldRender::drawMinimap ( MapTile *tile

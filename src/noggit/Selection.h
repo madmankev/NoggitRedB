@@ -10,6 +10,7 @@
 
 class SceneObject;
 class MapChunk;
+class GenericSelectableObject;
 
 class Selectable
 {
@@ -40,12 +41,14 @@ struct selected_chunk_type : Selectable
 };
 
 using selected_object_type = SceneObject*;
-using selection_type = std::variant<selected_object_type, selected_chunk_type>;
+using selected_generic_object_type = GenericSelectableObject*;
+using selection_type = std::variant<selected_object_type, selected_chunk_type, selected_generic_object_type>;
 //! \note Keep in same order as variant!
 enum eSelectionEntryTypes
 {
   eEntry_Object,
-  eEntry_MapChunk
+  eEntry_MapChunk,
+  eGeneric_Selectable
 };
 
 using selection_entry = std::pair<float, selection_type>;

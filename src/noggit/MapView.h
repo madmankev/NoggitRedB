@@ -93,6 +93,7 @@ namespace Noggit
     class hole_tool;
     struct tileset_chooser;
     class ObjectPalette;
+    class TaxiEditor;
   }
 }
 
@@ -417,6 +418,7 @@ private:
   Noggit::Ui::MinimapCreator* minimapTool;
   Noggit::Ui::Tools::BrushStack* stampTool;
   Noggit::Ui::Tools::LightEditor* lightEditor;
+  Noggit::Ui::TaxiEditor* taxiEditor;
   Noggit::Ui::Tools::ChunkManipulator::ChunkManipulatorPanel* _chunk_manipulator;
   Noggit::Scripting::scripting_tool* scriptingTool;
 
@@ -471,6 +473,7 @@ private:
   void setupLightEditorUi();
   void setupScriptingUi();
   void setupChunkManipulatorUi();
+  void setupTaxiEditorUi();
   void setupNodeEditor();
   void setupAssetBrowser();
   void setupDetailInfos();

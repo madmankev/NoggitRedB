@@ -100,6 +100,7 @@ public:
                              , bool draw_wmo
                              , bool draw_models
                              , bool draw_hidden_models
+                             , bool do_taxi_nodes
                              );
 
   MapChunk* getChunkAt(glm::vec3 const& pos);

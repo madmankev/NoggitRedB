@@ -204,7 +204,7 @@ std::optional<selection_type> World::get_last_selected_model() const
                    , _current_selection.rend()
                    , [&] (selection_type const& entry)
                      {
-                       return entry.index() != eEntry_MapChunk;
+                       return entry.index() == eEntry_Object;
                      }
                    )
     );
@@ -252,7 +252,7 @@ void World::rotate_selected_models_randomly(float minX, float maxX, float minY, 
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -328,7 +328,7 @@ void World::rotate_selected_models_to_ground_normal(bool smoothNormals)
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -470,13 +470,13 @@ void World::set_current_selection(selection_type entry)
   _current_selection.push_back(entry);
   _multi_select_pivot = std::nullopt;
 
-  _selected_model_count = entry.index() == eEntry_MapChunk ? 0 : 1;
+  _selected_model_count = entry.index() != eEntry_Object ? 0 : 1;
 }
 
 void World::add_to_selection(selection_type entry)
 {
   ZoneScoped;
-  if (entry.index() != eEntry_MapChunk)
+  if (entry.index() == eEntry_Object)
   {
     _selected_model_count++;
   }
@@ -491,7 +491,7 @@ void World::remove_from_selection(selection_type entry)
   std::vector<selection_type>::iterator position = std::find(_current_selection.begin(), _current_selection.end(), entry);
   if (position != _current_selection.end())
   {
-    if (entry.index() != eEntry_MapChunk)
+    if (entry.index() == eEntry_Object)
     {
       _selected_model_count--;
     }
@@ -532,6 +532,7 @@ void World::reset_selection()
   _current_selection.clear();
   _multi_select_pivot = std::nullopt;
   _selected_model_count = 0;
+  renderer()->setSelectedPathNode(nullptr);
 }
 
 void World::delete_selected_models()
@@ -548,7 +549,7 @@ void World::snap_selected_models_to_the_ground()
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -643,7 +644,7 @@ void World::move_selected_models(float dx, float dy, float dz)
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -689,7 +690,7 @@ void World::set_selected_models_pos(glm::vec3 const& pos, bool change_height)
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -716,7 +717,7 @@ void World::rotate_selected_models(math::degrees rx, math::degrees ry, math::deg
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -757,7 +758,7 @@ void World::set_selected_models_rotation(math::degrees rx, math::degrees ry, mat
   for (auto& entry : _current_selection)
   {
     auto type = entry.index();
-    if (type == eEntry_MapChunk)
+    if (type != eEntry_Object)
     {
       continue;
     }
@@ -796,6 +797,7 @@ selection_result World::intersect (glm::mat4x4 const& model_view
                                   , bool draw_wmo
                                   , bool draw_models
                                   , bool draw_hidden_models
+                                  , bool do_taxi_nodes
                                   )
 {
   ZoneScopedN("World::intersect()");
@@ -852,6 +854,16 @@ selection_result World::intersect (glm::mat4x4 const& model_view
         }
       });
     }
+  }
+
+  if (!pOnlyMap && do_taxi_nodes)
+  {
+      ZoneScopedN("World::intersect() : intersect Taxi path nodes");
+      if (_renderer.selectedTaxiPath() != nullptr)
+        for (auto& pathnode : _renderer.selectedTaxiPath()->PathNodes)
+        {
+            pathnode.intersect(ray, &results);
+        }
   }
 
   return std::move(results);
