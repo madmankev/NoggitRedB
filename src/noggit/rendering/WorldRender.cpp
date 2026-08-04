@@ -722,9 +722,9 @@ void WorldRender::draw (glm::mat4x4 const& model_view
     shader.uniform("fade_dist", _detail_doodad_distance);
 
     // the client draws these without backface culling, depth-writing, alpha-keyed
-    gl.disable(GL_CULL_FACE);
-    gl.disable(GL_BLEND);
-    gl.depthMask(GL_TRUE);
+    OpenGL::Scoped::bool_setter<GL_CULL_FACE, GL_FALSE> const cull;
+    OpenGL::Scoped::bool_setter<GL_BLEND, GL_FALSE> const blend;
+    OpenGL::Scoped::depth_mask_setter<GL_TRUE> const depth_mask;
 
     for (auto const& pair : _world->_loaded_tiles_buffer)
     {
@@ -765,8 +765,6 @@ void WorldRender::draw (glm::mat4x4 const& model_view
         }
       }
     }
-
-    gl.enable(GL_CULL_FACE);
   }
   _detail_doodads.endFrame(frame);
 
