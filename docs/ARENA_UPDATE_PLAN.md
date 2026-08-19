@@ -30,7 +30,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 36 | Object Palette Save/Load | fixed |
 | 37 | Copy asset path in Object Editor | already fixed in baseline |
 | 43 | Object rotation speed framerate dependent | already fixed in baseline |
-| 44 | Patch client with project folder | |
+| 44 | Patch client with project folder | fixed |
 | 46 | Camera collision | fixed |
 | 47 | Invalid ADT offsets not selectable | already fixed in baseline |
 | 50 | Error panel/console | fixed (c2c7b18) |

@@ -169,6 +169,35 @@ std::optional<Archive::MPQArchive*> BlizzardArchive::ClientData::tryCreateMPQArc
     return std::nullopt;
 }
 
+// Issue #44: unloads an MPQ archive (closing its file handle) and deletes it from disk.
+bool BlizzardArchive::ClientData::deleteMPQArchiveOnDisk(std::string const& archive_name)
+{
+    if (_storage_type != StorageType::MPQ)
+        return false;
+
+    const std::lock_guard _lock(_mutex);
+
+    std::string mpq_path = (fs::path(_path) / "Data" / archive_name).string();
+
+    // unload the archive from memory first so its file handle gets closed
+    for (auto it = _archives.begin(); it != _archives.end(); ++it)
+    {
+        if ((*it)->path() == mpq_path)
+        {
+            delete *it;
+            it = _archives.erase(it);
+            break;
+        }
+    }
+
+    if (!fs::exists(mpq_path) || fs::is_directory(mpq_path))
+        return false;
+
+    std::error_code ec;
+    const bool removed = fs::remove(mpq_path, ec);
+    return removed && !ec;
+}
+
 bool BlizzardArchive::ClientData::isMPQNameValid(std::string const& archive_name, bool exclude_base_mpqs)
 {
     // Make sure archive_name is lowercase!

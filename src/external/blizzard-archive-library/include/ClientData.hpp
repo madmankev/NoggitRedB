@@ -120,6 +120,9 @@ namespace BlizzardArchive
     bool mpqArchiveExistsOnDisk(std::string const& archive_name);
     std::optional<Archive::MPQArchive*> getMPQArchive(std::string const& archive_name);
     std::optional<Archive::MPQArchive*> tryCreateMPQArchive(std::string const& archive_name);
+    // Issue #44: unloads an MPQ archive (closing its file handle) and deletes it from disk,
+    // used by the patch export "overwrite" mode. Returns false if the file cannot be removed.
+    bool deleteMPQArchiveOnDisk(std::string const& archive_name);
     bool isMPQNameValid(std::string const& archive_name, bool exclude_base_mpqs);
 
     [[nodiscard]]

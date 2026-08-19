@@ -675,6 +675,8 @@ namespace Noggit::Ui::Windows
       // Option to make folder patch ?
 
       QDialog* mpq_patch_params = new QDialog(this);
+      // Fix for issue #44: dialogs were leaked on each invocation
+      mpq_patch_params->setAttribute(Qt::WA_DeleteOnClose);
       mpq_patch_params->setWindowFlags(Qt::Dialog);
       mpq_patch_params->setWindowTitle("Patch Export Settings");
       QVBoxLayout* mpq_patch_params_layout = new QVBoxLayout(mpq_patch_params);
@@ -710,12 +712,11 @@ namespace Noggit::Ui::Windows
 
 
       // mode choice between replace archive and add files to archive
+      // Fix for issue #44: overwrite mode is now implemented, it deletes the existing
+      // archive (after confirmation) and rebuilds it from the project folder.
       QCheckBox* mpq_overwrite_chk = new QCheckBox("Overwrite Archive", mpq_patch_params);
       mpq_overwrite_chk->setToolTip("If there is already an archive with this name, it will be deleted and replaced by a new one.");
       mpq_overwrite_chk->setChecked(false);
-      // Unimplemented
-      mpq_overwrite_chk->setHidden(true);
-      mpq_overwrite_chk->setDisabled(true);
       mpq_patch_params_layout->addWidget(mpq_overwrite_chk);
 
 
@@ -781,6 +782,26 @@ namespace Noggit::Ui::Windows
               return;
           }
 
+          // Fix for issue #44: overwrite mode, delete the existing archive first (after confirmation).
+          if (mpq_overwrite_chk->isChecked() && clientData->mpqArchiveExistsOnDisk(archive_name))
+          {
+              if (QMessageBox::question(this, "Overwrite Archive"
+                  , std::format("Replace existing archive {} with a new one built from the project folder?", archive_name).c_str()
+                  , QMessageBox::Yes | QMessageBox::No
+                  , QMessageBox::No) != QMessageBox::Yes)
+              {
+                  return;
+              }
+
+              if (!clientData->deleteMPQArchiveOnDisk(archive_name))
+              {
+                  QMessageBox::warning(this, "Error"
+                      , std::format("Could not delete existing archive {}.\nMake sure it isn't opened by the client or an MPQ editor.", archive_name).c_str());
+                  return;
+              }
+          }
+
+          bool archive_creation_failed = false;
           if (!clientData->mpqArchiveExistsOnDisk(archive_name))
           {
               try
@@ -790,11 +811,19 @@ namespace Noggit::Ui::Windows
               catch (BlizzardArchive::Exceptions::Archive::ArchiveOpenError& e)
               {
                   QMessageBox::critical(nullptr, "Error", e.what());
+                  archive_creation_failed = true;
               }
               catch (...)
               {
                   QMessageBox::critical(nullptr, "Error", "Failed to create MPQ Archive. Unhandled exception.");
+                  archive_creation_failed = true;
               }
+          }
+
+          // Fix for issue #44: don't try to access the archive after a failed creation.
+          if (archive_creation_failed)
+          {
+              return;
           }
           {
               auto archive = clientData->getMPQArchive(archive_name);
@@ -805,6 +834,8 @@ namespace Noggit::Ui::Windows
                   progress_box->setStandardButtons(QMessageBox::NoButton);
                   progress_box->setWindowFlags(progress_box->windowFlags() & ~Qt::WindowCloseButtonHint);
                   // progress_box->exec(); // this stops code execution
+                  // Fix for issue #44: the progress box was never actually shown before saving.
+                  progress_box->show();
                   progress_box->repaint();
                   qApp->processEvents();
 
@@ -840,6 +871,8 @@ namespace Noggit::Ui::Windows
                   }
 
                   progress_box->close();
+                  // Fix for issue #44: dialog was leaked after each patch export
+                  progress_box->deleteLater();
               }
               else
                   QMessageBox::warning(this, "Error", std::format("Error accessing archive {}", archive_name).c_str());
