@@ -92,6 +92,13 @@ void WorldRender::draw (glm::mat4x4 const& model_view
 
   ZoneScoped;
 
+  // Issue #63: apply a pending shader reload with this renderer's GL
+  // context current.
+  if (_shader_reload_requested.exchange(false))
+  {
+    reload_shaders();
+  }
+
   glm::mat4x4 const mvp(projection * model_view);
   math::frustum const frustum (mvp);
 
@@ -1505,71 +1512,71 @@ void WorldRender::upload()
 
   _m2_program.reset
     ( new OpenGL::program
-          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_vs") }
-              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_fs") }
+          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs") }
+              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
           }
     );
 
   _m2_instanced_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_vs", {"instanced"}) }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs", {"instanced"}) }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
             }
       );
 
   _m2_box_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_box_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_box_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_box_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_box_fs") }
             }
       );
 
   _m2_ribbons_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("ribbon_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("ribbon_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("ribbon_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("ribbon_fs") }
             }
       );
 
   _m2_particles_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("particle_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("particle_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("particle_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("particle_fs") }
             }
       );
 
   _mcnk_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("terrain_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("terrain_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("terrain_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("terrain_fs") }
             }
       );
 
   _mfbo_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("mfbo_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("mfbo_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("mfbo_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("mfbo_fs") }
             }
       );
 
   _wmo_program.reset
       ( new OpenGL::program
-            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("wmo_vs") }
-                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("wmo_fs") }
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("wmo_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wmo_fs") }
             }
       );
 
   _liquid_program.reset(
       new OpenGL::program
-          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("liquid_vs") }
-              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("liquid_fs") }
+          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("liquid_vs") }
+              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("liquid_fs") }
           }
   );
 
   _occluder_program.reset(
       new OpenGL::program
-          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("occluder_vs") }
-              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("occluder_fs") }
+          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("occluder_vs") }
+              , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("occluder_fs") }
           }
   );
 
@@ -1690,12 +1697,226 @@ void WorldRender::upload()
     occluder_shader.bind_uniform_block("matrices", 0);
   }
 
+  // Issue #63: register for shader hot reloading (development only, the
+  // watcher only starts when disk shader mode is enabled). The actual
+  // reload is deferred to the next draw: VAOs are not shared between GL
+  // contexts, so setupChunkVAO/setupLiquidChunkVAO have to run with this
+  // renderer's context current.
+  if (_shader_reload_registration < 0)
+  {
+    _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback
+      ([this]()
+       {
+         _shader_reload_requested = true;
+       });
+  }
+}
 
+bool WorldRender::reload_shaders()
+{
+  ZoneScoped;
+
+  // Build all the programs up-front: if any shader fails to compile, keep
+  // the previous pipeline so the editor stays usable.
+  std::unique_ptr<OpenGL::program> m2_program;
+  std::unique_ptr<OpenGL::program> m2_instanced_program;
+  std::unique_ptr<OpenGL::program> m2_box_program;
+  std::unique_ptr<OpenGL::program> m2_ribbons_program;
+  std::unique_ptr<OpenGL::program> m2_particles_program;
+  std::unique_ptr<OpenGL::program> mcnk_program;
+  std::unique_ptr<OpenGL::program> mfbo_program;
+  std::unique_ptr<OpenGL::program> wmo_program;
+  std::unique_ptr<OpenGL::program> liquid_program;
+  std::unique_ptr<OpenGL::program> occluder_program;
+
+  try
+  {
+    m2_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
+            }
+      );
+
+    m2_instanced_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs", {"instanced"}) }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
+            }
+      );
+
+    m2_box_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_box_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_box_fs") }
+            }
+      );
+
+    m2_ribbons_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("ribbon_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("ribbon_fs") }
+            }
+      );
+
+    m2_particles_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("particle_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("particle_fs") }
+            }
+      );
+
+    mcnk_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("terrain_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("terrain_fs") }
+            }
+      );
+
+    mfbo_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("mfbo_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("mfbo_fs") }
+            }
+      );
+
+    wmo_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("wmo_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wmo_fs") }
+            }
+      );
+
+    liquid_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("liquid_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("liquid_fs") }
+            }
+      );
+
+    occluder_program.reset
+      ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("occluder_vs") }
+                , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("occluder_fs") }
+            }
+      );
+  }
+  catch (std::exception const& e)
+  {
+    LogError << "Shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    return false;
+  }
+  catch (...)
+  {
+    LogError << "Shader reload failed, keeping the previous shaders." << std::endl;
+    return false;
+  }
+
+  _m2_program = std::move(m2_program);
+  _m2_instanced_program = std::move(m2_instanced_program);
+  _m2_box_program = std::move(m2_box_program);
+  _m2_ribbons_program = std::move(m2_ribbons_program);
+  _m2_particles_program = std::move(m2_particles_program);
+  _mcnk_program = std::move(mcnk_program);
+  _mfbo_program = std::move(mfbo_program);
+  _wmo_program = std::move(wmo_program);
+  _liquid_program = std::move(liquid_program);
+  _occluder_program = std::move(occluder_program);
+
+  // Rebind the uniform blocks and VAO attribs for the new programs, the
+  // buffers were already uploaded by upload().
+  {
+    OpenGL::Scoped::use_program m2_shader {*_m2_program.get()};
+    m2_shader.uniform("bone_matrices", 0);
+    m2_shader.uniform("tex1", 1);
+    m2_shader.uniform("tex2", 2);
+    m2_shader.bind_uniform_block("matrices", 0);
+    m2_shader.bind_uniform_block("lighting", 1);
+  }
+
+  {
+    std::vector<int> samplers {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+
+    OpenGL::Scoped::use_program wmo_program {*_wmo_program.get()};
+    wmo_program.uniform("render_batches_tex", 0);
+    wmo_program.uniform("texture_samplers", samplers);
+    wmo_program.bind_uniform_block("matrices", 0);
+    wmo_program.bind_uniform_block("lighting", 1);
+  }
+
+  {
+    OpenGL::Scoped::use_program mcnk_shader {*_mcnk_program.get()};
+
+    setupChunkVAO(mcnk_shader);
+
+    mcnk_shader.bind_uniform_block("matrices", 0);
+    mcnk_shader.bind_uniform_block("lighting", 1);
+    mcnk_shader.bind_uniform_block("overlay_params", 2);
+    mcnk_shader.bind_uniform_block("chunk_instances", 3);
+
+    mcnk_shader.uniform("heightmap", 0);
+    mcnk_shader.uniform("mccv", 1);
+    mcnk_shader.uniform("shadowmap", 2);
+    mcnk_shader.uniform("alphamap", 3);
+    mcnk_shader.uniform("stamp_brush", 4);
+    mcnk_shader.uniform("base_instance", 0);
+
+    std::vector<int> samplers {5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+    mcnk_shader.uniform("textures", samplers);
+  }
+
+  {
+    OpenGL::Scoped::use_program m2_shader_instanced {*_m2_instanced_program.get()};
+    m2_shader_instanced.bind_uniform_block("matrices", 0);
+    m2_shader_instanced.bind_uniform_block("lighting", 1);
+    m2_shader_instanced.uniform("bone_matrices", 0);
+    m2_shader_instanced.uniform("tex1", 1);
+    m2_shader_instanced.uniform("tex2", 2);
+  }
+
+  {
+    OpenGL::Scoped::use_program liquid_render {*_liquid_program.get()};
+
+    setupLiquidChunkVAO(liquid_render);
+
+    static std::vector<int> samplers {2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+
+    liquid_render.bind_uniform_block("matrices", 0);
+    liquid_render.bind_uniform_block("lighting", 1);
+    liquid_render.bind_uniform_block("liquid_layers_params", 4);
+    liquid_render.uniform("vertex_data", 0);
+    liquid_render.uniform("texture_samplers", samplers);
+  }
+
+  {
+    OpenGL::Scoped::use_program mfbo_shader {*_mfbo_program.get()};
+    mfbo_shader.bind_uniform_block("matrices", 0);
+  }
+
+  {
+    OpenGL::Scoped::use_program m2_box_shader {*_m2_box_program.get()};
+    m2_box_shader.bind_uniform_block("matrices", 0);
+  }
+
+  {
+    OpenGL::Scoped::use_program occluder_shader {*_occluder_program.get()};
+    occluder_shader.bind_uniform_block("matrices", 0);
+  }
+
+  Log << "Shaders reloaded from disk." << std::endl;
+  return true;
 }
 
 void WorldRender::unload()
 {
   ZoneScoped;
+
+  if (_shader_reload_registration >= 0)
+  {
+    OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+    _shader_reload_registration = -1;
+  }
+
   _mcnk_program.reset();
   _mfbo_program.reset();
   _m2_program.reset();

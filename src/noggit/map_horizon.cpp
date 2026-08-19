@@ -11,6 +11,7 @@
 
 #include <opengl/context.hpp>
 #include <opengl/context.inl>
+#include <opengl/shader.hpp>
 #include <noggit/Misc.h>
 
 #include <bitset>
@@ -650,6 +651,15 @@ map_horizon::minimap::minimap(const map_horizon& horizon)
 
 map_horizon::render::render(const map_horizon& horizon)
 {
+  // Issue #63: register for shader hot reloading (development only). The
+  // callback only flags the change; draw() rebuilds the program in its own
+  // GL context (VAOs are not shared among GL contexts).
+  _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+    [this]()
+    {
+      _shader_reload_dirty = true;
+    });
+
   std::vector<glm::vec3> vertices;
 
   for (size_t y (0); y < 64; ++y)
@@ -688,6 +698,16 @@ map_horizon::render::render(const map_horizon& horizon)
   gl.bufferData<GL_ARRAY_BUFFER, glm::vec3> (_vertex_buffer, vertices, GL_STATIC_DRAW);
 }
 
+map_horizon::render::~render()
+{
+  // Issue #63: stop watching for this instance (the callback captures this).
+  if (_shader_reload_registration >= 0)
+  {
+    OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+    _shader_reload_registration = -1;
+  }
+}
+
 static inline uint32_t outer_index(const map_horizon_batch &batch, int y, int x)
 {
   return batch.vertex_start + y * 17 + x;
@@ -708,6 +728,29 @@ void map_horizon::render::draw( glm::mat4x4 const& model_view
                               , display_mode display
                               )
 {
+  // Issue #63: a shader file changed; rebuild in this context. A broken
+  // shader edit keeps the previous program alive. The vertex attribs are
+  // (re)bound at the end of this method for whichever program is current.
+  if (_shader_reload_dirty.exchange(false) && _map_horizon_program)
+  {
+    try
+    {
+      std::unique_ptr<OpenGL::program> reloaded_program;
+      reloaded_program.reset
+        ( new OpenGL::program
+            { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("horizon_vs") }
+            , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("horizon_fs") }
+            }
+        );
+
+      _map_horizon_program = std::move(reloaded_program);
+    }
+    catch (std::exception const& e)
+    {
+      LogError << "Issue #63: horizon shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    }
+  }
+
   std::vector<uint32_t> indices;
 
   const TileIndex current_index(camera);
@@ -772,8 +815,8 @@ void map_horizon::render::draw( glm::mat4x4 const& model_view
 
     _map_horizon_program.reset
       ( new OpenGL::program
-          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("horizon_vs") }
-          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("horizon_fs") }
+          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("horizon_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("horizon_fs") }
           }
       );
   

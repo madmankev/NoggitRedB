@@ -11,11 +11,19 @@
 #include <glm/vec4.hpp>
 
 #include <initializer_list>
+#include <functional>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
 #include <array>
 #include <optional>
+
+#include <QObject>
+#include <QString>
+
+class QFileSystemWatcher;
+class QTimer;
 
 namespace math
 {
@@ -39,6 +47,22 @@ namespace OpenGL
     static std::string src_from_qrc(std::string const& shader_alias);
     static std::string src_from_qrc(std::string const& shader_alias, std::vector<std::string> const& defines);
 
+    // Issue #63 (shader hot reloading for development): reads the shader
+    // from the disk deploy directory (<exe>/shaders or $NOGGIT_SHADER_DIR)
+    // when disk shader mode is enabled, falling back to the QRC bundle
+    // otherwise. The QRC resources therefore stay the shipping default.
+    static std::string src_from_file_or_qrc(std::string const& shader_alias);
+    static std::string src_from_file_or_qrc(std::string const& shader_alias, std::vector<std::string> const& defines);
+
+    // whether shaders are read from disk (enabled via the
+    // developer/shader_hot_reload setting or the NOGGIT_SHADER_DIR
+    // environment variable) and a shader directory actually exists.
+    static bool use_disk_shaders();
+    // resolved on-disk shader directory, empty when unavailable/disabled
+    static QString shader_directory();
+    // maps a shader alias (e.g. "m2_vs") to its disk file name ("m2_vert.glsl")
+    static QString file_name_for_alias(std::string const& shader_alias);
+
     shader (shader const&) = delete;
     shader (shader&&) = delete;
     shader& operator= (shader const&) = delete;
@@ -48,6 +72,41 @@ namespace OpenGL
     friend struct program;
 
     GLuint _handle;
+  };
+
+  // Issue #63: watches the on-disk shader directory and notifies every
+  // registered component when a shader file changes (debounced). Callbacks
+  // run without a current GL context and may come from another thread, so
+  // a callback should only flag the change and let the component's regular
+  // draw method rebuild its GL state in its owning context (VAOs are not
+  // shared across GL contexts). Rebuilds are expected to keep the previous
+  // GL state alive when the new sources fail to compile.
+  class shader_reloader : public QObject
+  {
+    Q_OBJECT
+
+  public:
+    static shader_reloader* instance();
+
+    // Registers a callback notified (debounced) whenever a shader file
+    // changes. Returns a registration id used by remove_reload_callback().
+    // Registration also (lazily) starts the watcher when disk shader mode
+    // is enabled.
+    int add_reload_callback(std::function<void()> callback);
+    void remove_reload_callback(int id);
+
+    bool isWatching() const;
+
+  private:
+    shader_reloader();
+
+    void start_watching();
+    void reload_all();
+
+    QFileSystemWatcher* _watcher = nullptr;
+    QTimer* _debounce_timer = nullptr;
+    std::map<int, std::function<void()>> _callbacks;
+    int _next_id = 0;
   };
 
   struct program

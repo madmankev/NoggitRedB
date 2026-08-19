@@ -13,6 +13,7 @@
 #include <QOffscreenSurface>
 #include <QPixmap>
 
+#include <atomic>
 #include <vector>
 
 class ModelInstance;
@@ -84,6 +85,12 @@ class PreviewRenderer : public Noggit::Ui::Tools::ViewportManager::Viewport
 
     void unload();
 
+    // Issue #63 (shader hot reload): the registered callback only sets the
+    // dirty flag, draw() then rebuilds the programs in this renderer's own
+    // GL context (VAOs are not shared across GL contexts). A failing
+    // rebuild keeps the previous programs alive.
+    void reload_programs();
+
     void updateLightingUniformBlock();
 
     void updateMVPUniformBlock(const glm::mat4x4& model_view, const glm::mat4x4& projection);
@@ -114,6 +121,10 @@ class PreviewRenderer : public Noggit::Ui::Tools::ViewportManager::Viewport
 
     bool _uploaded = false;
     bool _lighting_needs_update = true;
+
+    // Issue #63 (shader hot reload)
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
 
   };
 

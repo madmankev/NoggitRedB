@@ -160,6 +160,13 @@ void PreviewRenderer::resetCamera(float x, float y, float z, float roll, float y
 
 void PreviewRenderer::draw()
 {
+  // Issue #63: a shader file changed; rebuild in this renderer's context.
+  // A broken shader edit keeps the previous programs alive.
+  if (_shader_reload_dirty.exchange(false) && _uploaded)
+  {
+    reload_programs();
+  }
+
   if (!_uploaded)
   [[unlikely]]
   {  
@@ -560,8 +567,8 @@ void PreviewRenderer::upload()
 
   _m2_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_vs") }
-      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
     }
   );
 
@@ -588,8 +595,8 @@ void PreviewRenderer::upload()
   
   _m2_instanced_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_vs", {"instanced"}) }
-        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs", {"instanced"}) }
+        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
     }
   );
 
@@ -606,8 +613,8 @@ void PreviewRenderer::upload()
 
   _m2_box_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("m2_box_vs") }
-        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("m2_box_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_box_vs") }
+        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_box_fs") }
     }
   );
 
@@ -622,16 +629,16 @@ void PreviewRenderer::upload()
 
   _m2_ribbons_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("ribbon_vs") }
-        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("ribbon_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("ribbon_vs") }
+        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("ribbon_fs") }
     }
   );
   
 
   _m2_particles_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("particle_vs") }
-        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("particle_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("particle_vs") }
+        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("particle_fs") }
     }
   );
 
@@ -641,8 +648,8 @@ void PreviewRenderer::upload()
   
   _wmo_program.reset
   (new OpenGL::program
-    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("wmo_vs") }
-        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("wmo_fs") }
+    { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("wmo_vs") }
+        , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wmo_fs") }
     }
   );
 
@@ -660,8 +667,8 @@ void PreviewRenderer::upload()
   _liquid_texture_manager.upload();
   _liquid_program.reset
     (new OpenGL::program
-      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("liquid_vs") }
-          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("liquid_fs") }
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("liquid_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("liquid_fs") }
       }
     );
 
@@ -692,6 +699,128 @@ void PreviewRenderer::upload()
  
   _uploaded = true;
 
+  // Issue #63: register for shader hot reloading (development only). The
+  // callback only flags the change; draw() rebuilds the programs in this
+  // renderer's own GL context (VAOs are not shared among GL contexts).
+  if (_shader_reload_registration < 0)
+  {
+    _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+      [this]()
+      {
+        _shader_reload_dirty = true;
+      });
+  }
+
+}
+
+
+// Issue #63: rebuild the programs from the on-disk shader sources. The new
+// programs are all built up-front and only swapped in when every one of
+// them compiled and linked, so a broken shader edit keeps the previous,
+// working programs alive.
+void PreviewRenderer::reload_programs()
+{
+  std::unique_ptr<OpenGL::program> m2_program;
+  std::unique_ptr<OpenGL::program> m2_instanced_program;
+  std::unique_ptr<OpenGL::program> m2_box_program;
+  std::unique_ptr<OpenGL::program> wmo_program;
+  std::unique_ptr<OpenGL::program> liquid_program;
+
+  try
+  {
+    m2_program.reset
+      (new OpenGL::program
+        { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
+        }
+      );
+
+    m2_instanced_program.reset
+      (new OpenGL::program
+        { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_vs", {"instanced"}) }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_fs") }
+        }
+      );
+
+    m2_box_program.reset
+      (new OpenGL::program
+        { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("m2_box_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("m2_box_fs") }
+        }
+      );
+
+    wmo_program.reset
+      (new OpenGL::program
+        { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("wmo_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wmo_fs") }
+        }
+      );
+
+    liquid_program.reset
+      (new OpenGL::program
+        { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("liquid_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("liquid_fs") }
+        }
+      );
+  }
+  catch (std::exception const& e)
+  {
+    LogError << "Issue #63: shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    return;
+  }
+
+  _m2_program = std::move(m2_program);
+  _m2_instanced_program = std::move(m2_instanced_program);
+  _m2_box_program = std::move(m2_box_program);
+  _wmo_program = std::move(wmo_program);
+  _liquid_program = std::move(liquid_program);
+
+  {
+    OpenGL::Scoped::use_program m2_shader{ *_m2_program.get() };
+    m2_shader.uniform("bone_matrices", 0);
+    m2_shader.uniform("tex1", 1);
+    m2_shader.uniform("tex2", 2);
+    m2_shader.bind_uniform_block("matrices", 0);
+    m2_shader.bind_uniform_block("lighting", 1);
+  }
+
+  {
+    OpenGL::Scoped::use_program m2_shader_instanced{ *_m2_instanced_program.get() };
+    m2_shader_instanced.bind_uniform_block("matrices", 0);
+    m2_shader_instanced.bind_uniform_block("lighting", 1);
+    m2_shader_instanced.uniform("bone_matrices", 0);
+    m2_shader_instanced.uniform("tex1", 1);
+    m2_shader_instanced.uniform("tex2", 2);
+  }
+
+  {
+    OpenGL::Scoped::use_program m2_box_shader{ *_m2_box_program.get() };
+    m2_box_shader.bind_uniform_block("matrices", 0);
+  }
+
+  {
+    std::vector<int> samplers{ 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+
+    OpenGL::Scoped::use_program wmo_program_shader{ *_wmo_program.get() };
+    wmo_program_shader.uniform("render_batches_tex", 0);
+    wmo_program_shader.uniform("texture_samplers", samplers);
+    wmo_program_shader.bind_uniform_block("matrices", 0);
+    wmo_program_shader.bind_uniform_block("lighting", 1);
+  }
+
+  {
+    OpenGL::Scoped::use_program liquid_render{ *_liquid_program.get() };
+
+    static std::vector<int> samplers{ 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+
+    liquid_render.bind_uniform_block("matrices", 0);
+    liquid_render.bind_uniform_block("lighting", 1);
+    liquid_render.bind_uniform_block("liquid_layers_params", 4);
+    liquid_render.uniform("vertex_data", 0);
+    liquid_render.uniform("texture_samplers", samplers);
+  }
+
+  Log << "Issue #63: preview shaders reloaded from disk." << std::endl;
 }
 
 
@@ -699,6 +828,12 @@ void PreviewRenderer::unload()
 {
   _grid.unload();
   _buffers.unload();
+
+  if (_shader_reload_registration >= 0)
+  {
+    OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+    _shader_reload_registration = -1;
+  }
 
   _m2_program.reset();
   _m2_instanced_program.reset();

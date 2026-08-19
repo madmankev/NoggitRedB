@@ -7,8 +7,11 @@
 
 #include <QDir>
 #include <QtCore/QSettings>
+#include <QtWidgets/QCheckBox>
 #include <QtWidgets/QComboBox>
 #include <QtWidgets/QFileDialog>
+#include <QtWidgets/QGridLayout>
+#include <QtWidgets/QLabel>
 #include <QtWidgets/QPushButton>
 
 #include <ui_SettingsPanel.h>
@@ -225,6 +228,27 @@ namespace Noggit
 
       // ui->_adt_loading_radius->setMaximum(ui->_adt_unload_dist->value() - 1);
       // ui->_adt_unload_dist->setMinimum(ui->_adt_loading_radius->value() + 1);
+
+      // Fix for issue #63 (shader hot reloading for development): offer the
+      // feature from the settings instead of requiring an env variable. The
+      // shaders are expected in the "shaders" folder next to the executable
+      // (deployed by the build, see CMakeLists.txt) or in $NOGGIT_SHADER_DIR.
+      {
+        auto* label = new QLabel(tr("Developer: shader hot reloading (requires restart)"), body);
+        label->setToolTip(tr("Reads GLSL shaders from the \"shaders\" folder next to the executable "
+                             "instead of the built-in resources and automatically reloads them "
+                             "when the files change on disk."));
+
+        _shader_hot_reload_cb = new QCheckBox(body);
+        _shader_hot_reload_cb->setChecked(_settings->value("developer/shader_hot_reload", false).toBool());
+
+        if (auto* grid = qobject_cast<QGridLayout*>(ui->_modern_features->parentWidget()->layout()))
+        {
+          int const row = grid->rowCount();
+          grid->addWidget(label, row, 0);
+          grid->addWidget(_shader_hot_reload_cb, row, 1);
+        }
+      }
     }
 
     void settings::discard_changes()
@@ -257,6 +281,7 @@ namespace Noggit
       ui->_use_mclq_liquids_export->setChecked(_settings->value("use_mclq_liquids_export", false).toBool());
       ui->_theme->setCurrentText(_settings->value("theme", "Dark").toString());
       ui->_modern_features->setChecked(_settings->value("modern_features", false).toBool());
+      _shader_hot_reload_cb->setChecked(_settings->value("developer/shader_hot_reload", false).toBool());
 
       ui->assetBrowserBgCol->setColor(_settings->value("assetBrowser/background_color",
         QVariant::fromValue(QColor(127, 127, 127))).value<QColor>());
@@ -349,6 +374,7 @@ namespace Noggit
       _settings->setValue("classicUI", ui->_classic_ui->isChecked());
       _settings->setValue("modern_features", ui->_modern_features->isChecked());
       _settings->setValue("use_mclq_liquids_export", ui->_use_mclq_liquids_export->isChecked());
+      _settings->setValue("developer/shader_hot_reload", _shader_hot_reload_cb->isChecked());
 
       // _settings->setValue ("project/mysql/enabled", ui->MySQL_box->isChecked());
       _settings->setValue("project/mysql/enabled", ui->mysql_uid_checkbox->isChecked());

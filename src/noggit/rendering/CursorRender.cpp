@@ -1,15 +1,33 @@
-﻿// This file is part of Noggit3, licensed under GNU General Public License (version 3).
+// This file is part of Noggit3, licensed under GNU General Public License (version 3).
 
 #include "CursorRender.hpp"
 #include "math/trig.hpp"
+#include "noggit/Log.h"
 #include "opengl/shader.hpp"
 
 #include <glm/gtx/transform.hpp>
+
+#include <stdexcept>
 
 namespace Noggit
 {
   void CursorRender::draw(Mode cursor_mode, glm::mat4x4 const& mvp, glm::vec4 color, glm::vec3 const& pos, float radius, float inner_radius_ratio)
   {
+    // Issue #63: a shader file changed; rebuild in this context. A broken
+    // shader edit keeps the previous program alive (reload_program() only
+    // replaces the GL state after a successful build).
+    if (_shader_reload_dirty.exchange(false) && _uploaded)
+    {
+      try
+      {
+        reload_program();
+      }
+      catch (std::exception const& e)
+      {
+        LogError << "Issue #63: cursor shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+      }
+    }
+
     if (!_uploaded)
     {
       upload();
@@ -40,8 +58,8 @@ namespace Noggit
 
     _cursor_program.reset
       ( new OpenGL::program
-          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_qrc("cursor_vs") }
-          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("cursor_fs") }
+          { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("cursor_vs") }
+          , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("cursor_fs") }
           }
       );    
 
@@ -53,6 +71,32 @@ namespace Noggit
     create_cube_buffer(shader);
 
     _uploaded = true;
+
+    // Issue #63: register for shader hot reloading (development only).
+    if (_shader_reload_registration < 0)
+    {
+      _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+        [this]()
+        {
+          _shader_reload_dirty = true;
+        });
+    }
+  }
+
+  void CursorRender::reload_program()
+  {
+    // Compile a probe program first so a broken shader edit leaves the
+    // previous, working GL state untouched.
+    OpenGL::program const probe
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("cursor_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("cursor_fs") }
+      };
+
+    _vaos.unload();
+    _vbos.unload();
+    _uploaded = false;
+
+    upload();
   }
 
   void CursorRender::create_circle_buffer(OpenGL::Scoped::use_program& shader)
@@ -234,6 +278,11 @@ namespace Noggit
       _vaos.unload();
       _vbos.unload();
 
+      if (_shader_reload_registration >= 0)
+      {
+        OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+        _shader_reload_registration = -1;
+      }
       _cursor_program.reset();
 
       _uploaded = false;

@@ -8,9 +8,16 @@
 
 #include <glm/gtc/type_ptr.hpp>
 
+#include <QCoreApplication>
+#include <QDebug>
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QOpenGLContext>
+#include <QSettings>
 #include <QTextStream>
+#include <QTimer>
 
 #include <stdexcept>
 #include <list>
@@ -80,6 +87,248 @@ namespace OpenGL
     src.insert(match.length() + match.position(), ss.str());
 
     return src;
+  }
+
+  namespace
+  {
+    QString resolved_shader_directory()
+    {
+      // Highest priority: explicit override from the environment.
+      QByteArray const env_dir = qgetenv("NOGGIT_SHADER_DIR");
+      if (!env_dir.isEmpty())
+      {
+        QDir const dir(QString::fromUtf8(env_dir));
+        if (dir.exists())
+        {
+          return dir.absolutePath();
+        }
+        qWarning() << "NOGGIT_SHADER_DIR" << env_dir << "does not exist, ignoring it.";
+      }
+
+      // Deployed shaders live next to the executable (see CMakeLists.txt).
+      {
+        QDir const dir(QCoreApplication::applicationDirPath() + "/shaders");
+        if (dir.exists())
+        {
+          return dir.absolutePath();
+        }
+      }
+
+      // Development fallback: shaders directory relative to the CWD.
+      {
+        QDir const dir(QDir::current().absoluteFilePath("shaders"));
+        if (dir.exists())
+        {
+          return dir.absolutePath();
+        }
+      }
+
+      return QString();
+    }
+  }
+
+  QString shader::file_name_for_alias(std::string const& shader_alias)
+  {
+    QString name = QString::fromStdString(shader_alias);
+
+    if (name.endsWith("_vs"))
+    {
+      name.chop(3);
+      name += "_vert.glsl";
+    }
+    else if (name.endsWith("_fs"))
+    {
+      name.chop(3);
+      name += "_frag.glsl";
+    }
+    else
+    {
+      name += ".glsl";
+    }
+
+    return name;
+  }
+
+  bool shader::use_disk_shaders()
+  {
+    // Forced by the environment for quick experiments.
+    if (!qgetenv("NOGGIT_SHADER_DIR").isEmpty())
+    {
+      return true;
+    }
+
+    QSettings const settings;
+    return settings.value("developer/shader_hot_reload", false).toBool();
+  }
+
+  QString shader::shader_directory()
+  {
+    if (!use_disk_shaders())
+    {
+      return QString();
+    }
+
+    return resolved_shader_directory();
+  }
+
+  std::string shader::src_from_file_or_qrc(std::string const& shader_alias)
+  {
+    QString const dir = shader_directory();
+
+    if (!dir.isEmpty())
+    {
+      QString const file_path = QFileInfo(dir, file_name_for_alias(shader_alias)).absoluteFilePath();
+      QFile f(file_path);
+
+      if (f.open(QFile::ReadOnly | QFile::Text))
+      {
+        QTextStream stream(&f);
+        return stream.readAll().toStdString();
+      }
+
+      qWarning() << "Could not load shader" << file_path << "from disk, falling back to the QRC bundle.";
+    }
+
+    return src_from_qrc(shader_alias);
+  }
+
+  std::string shader::src_from_file_or_qrc(std::string const& shader_alias, std::vector<std::string> const& defines)
+  {
+    std::string src(src_from_file_or_qrc(shader_alias));
+
+    if (defines.empty())
+    {
+      return src;
+    }
+
+    std::stringstream ss;
+
+    ss << "\n";
+    for (auto const& def : defines)
+    {
+      ss << "#define " << def << "\n";
+    }
+
+    std::regex regex("#version[ \t]+[0-9]+.*");
+    std::smatch match;
+
+    if (!std::regex_search(src, match, regex))
+    {
+      throw std::logic_error("shader " + shader_alias + " has no #version directive");
+    }
+
+    // #version is always the first thing in the shader, insert defines after it
+    src.insert(match.length() + match.position(), ss.str());
+
+    return src;
+  }
+
+  shader_reloader* shader_reloader::instance()
+  {
+    static shader_reloader inst;
+    return &inst;
+  }
+
+  shader_reloader::shader_reloader()
+    : QObject(nullptr)
+  {
+    _debounce_timer = new QTimer(this);
+    _debounce_timer->setSingleShot(true);
+    _debounce_timer->setInterval(250);
+
+    connect(_debounce_timer, &QTimer::timeout, this, &shader_reloader::reload_all);
+  }
+
+  int shader_reloader::add_reload_callback(std::function<void()> callback)
+  {
+    int const id = _next_id++;
+    _callbacks.emplace(id, std::move(callback));
+
+    start_watching();
+
+    return id;
+  }
+
+  void shader_reloader::remove_reload_callback(int id)
+  {
+    _callbacks.erase(id);
+  }
+
+  bool shader_reloader::isWatching() const
+  {
+    return _watcher && !_watcher->directories().isEmpty();
+  }
+
+  void shader_reloader::start_watching()
+  {
+    if (isWatching())
+    {
+      return;
+    }
+
+    QString const dir = shader::shader_directory();
+
+    if (dir.isEmpty())
+    {
+      return;
+    }
+
+    if (!_watcher)
+    {
+      _watcher = new QFileSystemWatcher(this);
+
+      // Shader saves often replace the file (breaking the file watch), so
+      // the whole directory is watched instead and file changes only restart
+      // the debounce timer.
+      connect(_watcher, &QFileSystemWatcher::directoryChanged
+              , this, [this] (QString const&) { _debounce_timer->start(); });
+      connect(_watcher, &QFileSystemWatcher::fileChanged
+              , this, [this] (QString const&) { _debounce_timer->start(); });
+    }
+
+    if (!_watcher->directories().contains(dir))
+    {
+      _watcher->addPath(dir);
+    }
+  }
+
+  void shader_reloader::reload_all()
+  {
+    if (_callbacks.empty())
+    {
+      return;
+    }
+
+    qInfo() << "Reloading shaders from" << shader::shader_directory();
+
+    // Iterate over a snapshot: callbacks can unregister themselves (e.g. a
+    // component's unload() removes its own registration) while running.
+    // No GL context is made current here: VAOs and FBOs are not shared
+    // across GL contexts, so components rebuild their GL state lazily from
+    // their regular draw methods (in their owning context) instead.
+    decltype(_callbacks) const callbacks = _callbacks;
+
+    for (auto const& pair : callbacks)
+    {
+      // skip callbacks that unregistered themselves before their turn
+      if (_callbacks.find(pair.first) == _callbacks.end())
+      {
+        continue;
+      }
+
+      try
+      {
+        pair.second();
+      }
+      catch (std::exception const& e)
+      {
+        qWarning() << "Shader reload callback failed:" << e.what();
+      }
+      catch (...)
+      {
+        qWarning() << "Shader reload callback failed with an unknown error.";
+      }
+    }
   }
 
   program::program (std::initializer_list<shader> shaders)

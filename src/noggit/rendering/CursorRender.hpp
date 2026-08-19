@@ -3,6 +3,7 @@
 #pragma once
 #include "opengl/scoped.hpp"
 
+#include <atomic>
 #include <memory>
 
 namespace OpenGL
@@ -37,6 +38,13 @@ namespace Noggit
     bool _uploaded = false;
 
     void upload();
+
+    // Issue #63 (shader hot reload): the registered callback only sets the
+    // dirty flag, draw() then rebuilds everything in its own GL context
+    // (VAOs are not shared across GL contexts).
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
+    void reload_program();
 
     void create_circle_buffer(OpenGL::Scoped::use_program& shader);
     void create_sphere_buffer(OpenGL::Scoped::use_program& shader);

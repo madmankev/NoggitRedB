@@ -7,6 +7,7 @@
 #include <math/trig.hpp>
 #include <noggit/ContextObject.hpp>
 
+#include <atomic>
 #include <memory>
 
 namespace math
@@ -41,7 +42,16 @@ namespace Noggit::Rendering::Primitives
   private:
     bool _buffers_are_setup = false;
 
+    // Issue #63 (shader hot reload): id of the registered reload callback
+    // or -1 when not registered, and a flag set by that callback so the
+    // next draw rebuilds the GL state in its own context.
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
+
     void setup_buffers();
+    // rebuilds the GL state from the current on-disk shader sources,
+    // keeping the previous state when they fail to compile
+    void reload_program();
 
     OpenGL::Scoped::deferred_upload_vertex_arrays<1> _vao;
     OpenGL::Scoped::deferred_upload_buffers<1> _buffers;
@@ -61,7 +71,12 @@ namespace Noggit::Rendering::Primitives
   private:
       bool _buffers_are_setup = false;
 
+      // Issue #63 (shader hot reload): see WireBox.
+      int _shader_reload_registration = -1;
+      std::atomic<bool> _shader_reload_dirty{false};
+
       void setup_buffers();
+      void reload_program();
 
       int _indice_count = 0;
 
@@ -90,9 +105,17 @@ namespace Noggit::Rendering::Primitives
   private:
     bool _buffers_are_setup = false;
 
+    // Issue #63 (shader hot reload): see WireBox. Note that the reload
+    // keeps the longitude/latitude of the current geometry.
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
+
     void setup_buffers(int longitude, int latitude);
+    void reload_program();
 
     int _indice_count = 0;
+    int _longitude = 32;
+    int _latitude = 18;
 
     OpenGL::Scoped::deferred_upload_vertex_arrays<1> _vao;
     OpenGL::Scoped::deferred_upload_buffers<2> _buffers;
@@ -115,7 +138,12 @@ namespace Noggit::Rendering::Primitives
   private:
     bool _buffers_are_setup = false;
 
+    // Issue #63 (shader hot reload): see WireBox.
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
+
     void setup_buffers();
+    void reload_program();
 
     OpenGL::Scoped::deferred_upload_vertex_arrays<1> _vao;
     OpenGL::Scoped::deferred_upload_buffers<2> _buffers;
@@ -132,6 +160,10 @@ namespace Noggit::Rendering::Primitives
 
   private:
       bool _buffers_are_setup = false;
+
+      // Issue #63 (shader hot reload): id of the registered reload callback
+      // or -1 when not registered.
+      int _shader_reload_registration = -1;
       void setup_buffers(int precision, World* world, int height);
       int _indice_count = 0;
 
@@ -151,6 +183,10 @@ namespace Noggit::Rendering::Primitives
 
   private:
       bool _buffers_are_setup = false;
+
+      // Issue #63 (shader hot reload): Line does not register with the
+      // shader_reloader because it rebuilds its program on every draw
+      // anyway; its draw() only guards against failing disk shaders.
       void setup_buffers(std::vector<glm::vec3> const points);
 
       void setup_buffers_interpolated(std::vector<glm::vec3> const points);

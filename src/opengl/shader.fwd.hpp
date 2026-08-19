@@ -6,6 +6,7 @@ namespace OpenGL
 {
   struct shader;
   struct program;
+  class shader_reloader;
 
   namespace Scoped
   {

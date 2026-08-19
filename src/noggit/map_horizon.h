@@ -14,6 +14,7 @@
 
 #include <QtGui/QImage>
 
+#include <atomic>
 #include <memory>
 
 class MapIndex;
@@ -53,6 +54,7 @@ public:
   struct render
   {
     render(const map_horizon& horizon);
+    ~render();
 
     void draw(glm::mat4x4 const& model_view
              , glm::mat4x4 const& projection
@@ -72,6 +74,11 @@ public:
     GLuint const& _index_buffer = _buffers[0];
     GLuint const& _vertex_buffer = _buffers[1];
     std::unique_ptr<OpenGL::program> _map_horizon_program;
+
+    // Issue #63 (shader hot reload): registered callback only sets the
+    // dirty flag, draw() then rebuilds the program in its own GL context.
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_dirty{false};
   };
 
   class minimap : public OpenGL::texture

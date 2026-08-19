@@ -448,6 +448,14 @@ add_custom_command(TARGET noggit POST_BUILD
         "${PROJECT_SOURCE_DIR}/dist/noggit-definitions"
         "$<TARGET_FILE_DIR:noggit>/noggit-definitions")
 
+# Fix for issue #63 (shader hot reloading): deploy the GLSL shader sources
+# next to the executable so enabling the "Shader hot reloading" developer
+# setting (or setting NOGGIT_SHADER_DIR) makes noggit read and watch them.
+add_custom_command(TARGET noggit POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${PROJECT_SOURCE_DIR}/src/noggit/rendering/glsl"
+        "$<TARGET_FILE_DIR:noggit>/shaders")
+
 # deploy for Qt on Windows
 IF(WIN32)
   include(windeployqt)

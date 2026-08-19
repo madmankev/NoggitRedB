@@ -3,6 +3,7 @@
 #include <noggit/rendering/Primitives.hpp>
 
 #include <math/bounding_box.hpp>
+#include <noggit/Log.h>
 #include <opengl/scoped.hpp>
 #include <opengl/context.hpp>
 #include <opengl/shader.hpp>
@@ -10,6 +11,7 @@
 #include <glm/gtc/constants.hpp>
 
 #include <array>
+#include <stdexcept>
 #include <vector>
 
 using namespace Noggit::Rendering::Primitives;
@@ -40,6 +42,18 @@ void WireBox::draw ( glm::mat4x4 const& model_view
                     , glm::vec3 const& max_point
                     )
 {
+
+  if (_shader_reload_dirty.exchange(false) && _buffers_are_setup)
+  {
+    try
+    {
+      reload_program();
+    }
+    catch (std::exception const& e)
+    {
+      LogError << "Issue #63: wire_box shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    }
+  }
 
   if (!_buffers_are_setup)
   {
@@ -74,8 +88,8 @@ void WireBox::draw ( glm::mat4x4 const& model_view
 
 void WireBox::setup_buffers()
 {
-  _program.reset(new OpenGL::program( {{ GL_VERTEX_SHADER, OpenGL::shader::src_from_qrc("wire_box_vs") }
-                 , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("wire_box_fs")}}));
+  _program.reset(new OpenGL::program( {{ GL_VERTEX_SHADER, OpenGL::shader::src_from_file_or_qrc("wire_box_vs") }
+                 , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wire_box_fs")}}));
 
   _vao.upload();
   _buffers.upload();
@@ -98,12 +112,46 @@ void WireBox::setup_buffers()
 
   _buffers_are_setup = true;
 
+  // Issue #63: register for shader hot reloading. The callback only flags
+  // the change; draw() rebuilds the GL state in its own context (VAOs are
+  // not shared among GL contexts).
+  if (_shader_reload_registration < 0)
+  {
+    _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+      [this]()
+      {
+        _shader_reload_dirty = true;
+      });
+  }
+
 }
+
+  void WireBox::reload_program()
+  {
+    // Compile a probe program first so a broken shader edit leaves the
+    // previous, working GL state untouched.
+    OpenGL::program const probe
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("wire_box_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("wire_box_fs") }
+      };
+
+    _vao.unload();
+    _buffers.unload();
+    _buffers_are_setup = false;
+
+    setup_buffers();
+  }
 
   void WireBox::unload()
   {
     _vao.unload();
     _buffers.unload();
+
+    if (_shader_reload_registration >= 0)
+    {
+      OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+      _shader_reload_registration = -1;
+    }
     _program.reset();
 
     _buffers_are_setup = false;
@@ -115,6 +163,18 @@ void WireBox::setup_buffers()
       , float radius
   )
   {
+    if (_shader_reload_dirty.exchange(false) && _buffers_are_setup)
+    {
+      try
+      {
+        reload_program();
+      }
+      catch (std::exception const& e)
+      {
+        LogError << "Issue #63: grid shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+      }
+    }
+
     if (!_buffers_are_setup)
     {
       setup_buffers();
@@ -138,10 +198,10 @@ void WireBox::setup_buffers()
     _buffers.upload();
 
     _program.reset(new OpenGL::program({{ GL_VERTEX_SHADER
-                                            , OpenGL::shader::src_from_qrc("grid_vs")
+                                            , OpenGL::shader::src_from_file_or_qrc("grid_vs")
                                         }
                                            , { GL_FRAGMENT_SHADER
-                                            , OpenGL::shader::src_from_qrc("grid_fs")
+                                            , OpenGL::shader::src_from_file_or_qrc("grid_fs")
                                         }
                                        }));
 
@@ -205,12 +265,42 @@ void WireBox::setup_buffers()
     }
 
     _buffers_are_setup = true;
+
+    // Issue #63: flag-only reload callback, see WireBox::setup_buffers.
+    if (_shader_reload_registration < 0)
+    {
+      _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+        [this]()
+        {
+          _shader_reload_dirty = true;
+        });
+    }
+  }
+
+  void Grid::reload_program()
+  {
+    OpenGL::program const probe
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("grid_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("grid_fs") }
+      };
+
+    _vao.unload();
+    _buffers.unload();
+    _buffers_are_setup = false;
+
+    setup_buffers();
   }
 
   void Grid::unload()
   {
     _vao.unload();
     _buffers.unload();
+
+    if (_shader_reload_registration >= 0)
+    {
+      OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+      _shader_reload_registration = -1;
+    }
     _program.reset();
 
     _buffers_are_setup = false;
@@ -220,6 +310,18 @@ void WireBox::setup_buffers()
   void Sphere::draw(glm::mat4x4 const& mvp, glm::vec3 const& pos, glm::vec4  const& color
       , float radius, int longitude, int latitude, float alpha, bool wireframe, bool drawBoth)
 {
+  if (_shader_reload_dirty.exchange(false) && _buffers_are_setup)
+  {
+    try
+    {
+      reload_program();
+    }
+    catch (std::exception const& e)
+    {
+      LogError << "Issue #63: sphere shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    }
+  }
+
   if (!_buffers_are_setup)
   {
     setup_buffers(longitude, latitude);
@@ -257,6 +359,9 @@ void Sphere::setup_buffers(int longitude, int latitude)
   _vao.upload();
   _buffers.upload();
 
+  _longitude = longitude;
+  _latitude = latitude;
+
   const int na = longitude;
   const int nb = latitude;
   const int na3 = na * 3;
@@ -266,9 +371,9 @@ void Sphere::setup_buffers(int longitude, int latitude)
   std::vector<std::uint16_t> indices;
 
   _program.reset(new OpenGL::program({{ GL_VERTEX_SHADER
-               , OpenGL::shader::src_from_qrc("sphere_vs")}
+               , OpenGL::shader::src_from_file_or_qrc("sphere_vs")}
              , { GL_FRAGMENT_SHADER
-               , OpenGL::shader::src_from_qrc("sphere_fs")
+               , OpenGL::shader::src_from_file_or_qrc("sphere_fs")
                }}));
 
   float x, y, z, a, b, da, db, r = 3.5f;
@@ -333,12 +438,42 @@ void Sphere::setup_buffers(int longitude, int latitude)
   }
 
   _buffers_are_setup = true;
+
+  // Issue #63: flag-only reload callback, see WireBox::setup_buffers.
+  if (_shader_reload_registration < 0)
+  {
+    _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+      [this]()
+      {
+        _shader_reload_dirty = true;
+      });
+  }
 }
+
+  void Sphere::reload_program()
+  {
+    OpenGL::program const probe
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("sphere_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("sphere_fs") }
+      };
+
+    _vao.unload();
+    _buffers.unload();
+    _buffers_are_setup = false;
+
+    setup_buffers(_longitude, _latitude);
+  }
 
   void Sphere::unload()
   {
     _vao.unload();
     _buffers.unload();
+
+    if (_shader_reload_registration >= 0)
+    {
+      OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+      _shader_reload_registration = -1;
+    }
     _program.reset();
 
     _buffers_are_setup = false;
@@ -352,6 +487,18 @@ void Sphere::setup_buffers(int longitude, int latitude)
                  , glm::vec4  const& color
                  )
 {
+  if (_shader_reload_dirty.exchange(false) && _buffers_are_setup)
+  {
+    try
+    {
+      reload_program();
+    }
+    catch (std::exception const& e)
+    {
+      LogError << "Issue #63: square shader reload failed, keeping the previous shaders: " << e.what() << std::endl;
+    }
+  }
+
   if (!_buffers_are_setup)
   {
     setup_buffers();
@@ -386,9 +533,9 @@ void Square::setup_buffers()
   std::vector<std::uint16_t> indices = {0,1,2, 2,3,0};
 
   _program.reset(new OpenGL::program({{ GL_VERTEX_SHADER
-               , OpenGL::shader::src_from_qrc("square_vs")
+               , OpenGL::shader::src_from_file_or_qrc("square_vs")
                }, { GL_FRAGMENT_SHADER
-               , OpenGL::shader::src_from_qrc("square_fs")
+               , OpenGL::shader::src_from_file_or_qrc("square_fs")
                }}));
 
 
@@ -412,12 +559,42 @@ void Square::setup_buffers()
   }
 
   _buffers_are_setup = true;
+
+  // Issue #63: flag-only reload callback, see WireBox::setup_buffers.
+  if (_shader_reload_registration < 0)
+  {
+    _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+      [this]()
+      {
+        _shader_reload_dirty = true;
+      });
+  }
 }
+
+  void Square::reload_program()
+  {
+    OpenGL::program const probe
+      { { GL_VERTEX_SHADER,   OpenGL::shader::src_from_file_or_qrc("square_vs") }
+      , { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("square_fs") }
+      };
+
+    _vao.unload();
+    _buffers.unload();
+    _buffers_are_setup = false;
+
+    setup_buffers();
+  }
 
   void Square::unload()
   {
     _vao.unload();
     _buffers.unload();
+
+    if (_shader_reload_registration >= 0)
+    {
+      OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+      _shader_reload_registration = -1;
+    }
     _program.reset();
 
     _buffers_are_setup = false;
@@ -448,6 +625,12 @@ void Square::setup_buffers()
   {
     _vao.unload();
     _buffers.unload();
+
+    if (_shader_reload_registration >= 0)
+    {
+      OpenGL::shader_reloader::instance()->remove_reload_callback(_shader_reload_registration);
+      _shader_reload_registration = -1;
+    }
     _program.reset();
 
     _buffers_are_setup = false;
@@ -465,8 +648,8 @@ void Square::setup_buffers()
       std::vector<std::uint16_t> indices;
 
       _program.reset(new OpenGL::program({
-          { GL_VERTEX_SHADER, OpenGL::shader::src_from_qrc("cylinder_vs")},
-          { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("cylinder_fs")}
+          { GL_VERTEX_SHADER, OpenGL::shader::src_from_file_or_qrc("cylinder_vs")},
+          { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("cylinder_fs")}
       }));
 
       int num = (precision + 1) * 2;
@@ -517,6 +700,16 @@ void Square::setup_buffers()
       }
 
       _buffers_are_setup = true;
+
+      // Issue #63: flag-only reload callback, see WireBox::setup_buffers.
+      if (_shader_reload_registration < 0)
+      {
+        _shader_reload_registration = OpenGL::shader_reloader::instance()->add_reload_callback(
+          [this]()
+          {
+            _shader_reload_dirty = true;
+          });
+      }
   }*/
 
   void Line::initSpline()
@@ -536,14 +729,35 @@ void Square::setup_buffers()
       if (points.size() < 2)
           return;
 
-      if (!spline || points.size() == 2)
+      // Issue #63: the program is rebuilt from the (possibly edited) shader
+      // sources on every draw. In disk shader mode a broken shader edit must
+      // not take the editor down: keep drawing with the last working program
+      // until the sources compile again.
+      try
       {
-          setup_buffers(points);
+          if (!spline || points.size() == 2)
+          {
+              setup_buffers(points);
+          }
+          else
+          {
+              initSpline();
+              setup_buffers_interpolated(points);
+          }
       }
-      else
+      catch (std::exception const& e)
       {
-          initSpline();
-          setup_buffers_interpolated(points);
+          if (!_program)
+          {
+              throw;
+          }
+
+          static std::string last_error;
+          if (last_error != e.what())
+          {
+              last_error = e.what();
+              LogError << "Issue #63: line shader build failed, keeping the previous shaders: " << e.what() << std::endl;
+          }
       }
 
       OpenGL::Scoped::use_program line_shader{ *_program.get() };
@@ -639,8 +853,8 @@ void Square::setup_buffers()
       _indice_count = (int)indices.size();
       _program.reset(new OpenGL::program(
           {
-              { GL_VERTEX_SHADER, OpenGL::shader::src_from_qrc("line_vs") },
-              { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_qrc("line_fs") }
+              { GL_VERTEX_SHADER, OpenGL::shader::src_from_file_or_qrc("line_vs") },
+              { GL_FRAGMENT_SHADER, OpenGL::shader::src_from_file_or_qrc("line_fs") }
           }
       ));
 
@@ -659,12 +873,16 @@ void Square::setup_buffers()
       }
 
       _buffers_are_setup = true;
+
+      // Issue #63: no shader_reloader registration needed, the sources are
+      // re-read on every draw anyway (see draw()).
   }
 
   void Line::unload()
   {
       _vao.unload();
       _buffers.unload();
+
       _program.reset();
 
       _buffers_are_setup = false;

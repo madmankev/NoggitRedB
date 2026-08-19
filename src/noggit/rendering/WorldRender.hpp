@@ -15,6 +15,7 @@
 
 #include <noggit/rendering/Primitives.hpp>
 
+#include <atomic>
 #include <memory>
 
 namespace OpenGL
@@ -128,6 +129,12 @@ namespace Noggit::Rendering
     void setupChunkBuffers();
     void setupLiquidChunkBuffers();
 
+    // Issue #63 (shader hot reloading for development): recreates the GL
+    // programs from the on-disk shader files and rebinds uniform blocks /
+    // VAO attribs. A failing rebuild keeps the previous programs alive.
+    // Must be called with this renderer's GL context current (draw does it).
+    bool reload_shaders();
+
     World* _world;
     float _cull_distance;
 
@@ -142,6 +149,8 @@ namespace Noggit::Rendering
     std::unique_ptr<OpenGL::program> _wmo_program;
     std::unique_ptr<OpenGL::program> _liquid_program;
     std::unique_ptr<OpenGL::program> _occluder_program;
+    int _shader_reload_registration = -1;
+    std::atomic<bool> _shader_reload_requested{false};
 
     // horizon && skies && lighting
     std::unique_ptr<Noggit::map_horizon::render> _horizon_render;
