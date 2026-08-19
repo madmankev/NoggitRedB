@@ -3,9 +3,10 @@
 
 namespace BlizzardDatabaseLib
 {
-    BlizzardDatabase::BlizzardDatabase(const std::string& databaseDefinitionDirectory, const Structures::Build& build)
+    BlizzardDatabase::BlizzardDatabase(const std::string& databaseDefinitionDirectory, const Structures::Build& build, const std::string& tableFileExtension)
     : _databaseDefinitionFilesLocation(databaseDefinitionDirectory)
     , _build(build)
+    , _tableFileExtension(tableFileExtension)
     {
         _loadedTables = std::map<std::string, std::shared_ptr<BlizzardDatabaseTable>>();
         _blizzardTableReaderFactory = Reader::BlizzardTableReaderFactory();
@@ -27,7 +28,19 @@ namespace BlizzardDatabaseLib
         if (!tableFound)
             std::cout << "Verion Not found" << std::endl;
 
-        auto fileStream = file_callback("DBFilesClient\\" + tableName + ".dbc");
+        std::shared_ptr<BlizzardDatabaseLib::Stream::IMemStream> fileStream;
+
+        try
+        {
+            fileStream = file_callback("DBFilesClient\\" + tableName + _tableFileExtension);
+        }
+        catch (...)
+        {
+            // modern (4.x+) clients name the tables .db2 and legacy ones .dbc,
+            // retry with the other extension before giving up
+            std::string const alternateExtension = (_tableFileExtension == ".db2") ? ".dbc" : ".db2";
+            fileStream = file_callback("DBFilesClient\\" + tableName + alternateExtension);
+        }
 
         auto streamReader = std::make_shared<Stream::StreamReader>(fileStream);
         auto fileFormatIdentifier = streamReader->ReadString(4);

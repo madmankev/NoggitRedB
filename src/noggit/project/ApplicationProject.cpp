@@ -85,14 +85,49 @@ namespace Noggit::Project
       return {};
     }
 
-    project->ClientDatabase = std::make_shared<BlizzardDatabaseLib::BlizzardDatabase>(dbd_file_directory, client_build);
+    // 9.1.5x: modern clients store the game tables as .db2 (WDC3), pre-cata
+    // clients as .dbc (WDBC). The reader format is detected from the file magic,
+    // only the file name extension differs here.
+    project->ClientDatabase = std::make_shared<BlizzardDatabaseLib::BlizzardDatabase>(dbd_file_directory
+      , client_build
+      , client_archive_version == BlizzardArchive::ClientVersion::SL ? ".db2" : ".dbc");
 
     Log << "Loading Client Path : " << project->ClientPath << std::endl;
+
+    // 9.1.5x: CASC based clients address files by FileDataID only, so Noggit
+    // strictly needs a listfile.csv (FileDataID;path mapping) in the project
+    // folder. Fail early with a helpful message instead of an obscure error.
+    if (client_archive_version == BlizzardArchive::ClientVersion::SL)
+    {
+      std::filesystem::path const listfile_path = project_path / "listfile.csv";
+
+      if (!std::filesystem::exists(listfile_path))
+      {
+        std::string const message =
+          "The project folder does not contain the required \"listfile.csv\".\n\n"
+          "Modern (CASC based) clients address game files by FileDataID, so Noggit needs "
+          "the community listfile.csv mapping every FileDataID to a file path.\n"
+          "Download the community listfile export (e.g. from wago.tools or wow.tools) "
+          "and place it here:\n" + listfile_path.generic_string();
+
+        LogError << message << std::endl;
+        QMessageBox::critical(nullptr, "Missing listfile.csv", message.c_str());
+        return {};
+      }
+    }
 
     try
     {
       project->ClientData = std::make_shared<BlizzardArchive::ClientData>(
         project->ClientPath, client_archive_version, client_archive_locale, project_path.generic_string());
+    }
+    catch (BlizzardArchive::Exceptions::Listfile::ListfileNotFoundError& e)
+    {
+      LogError << e.what() << std::endl;
+      QMessageBox::critical(nullptr, "Missing listfile"
+        , "The listfile.csv could not be loaded. It is required for modern (CASC) clients, "
+          "place it in the project folder.");
+      return {};
     }
     catch (BlizzardArchive::Exceptions::Locale::LocaleNotFoundError& e)
     {

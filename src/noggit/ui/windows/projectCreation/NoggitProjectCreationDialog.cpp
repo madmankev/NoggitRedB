@@ -106,6 +106,78 @@ NoggitProjectCreationDialog::NoggitProjectCreationDialog(ProjectInformation& pro
 
                      project_information.game_client_version = ui->project_expansion->currentText().toStdString();
 
+                     // 9.1.5x: sanity checks and bootstrap for modern (CASC based) clients.
+                     if (project_information.game_client_version == "Shadowlands")
+                     {
+                       std::filesystem::path const build_info = game_path / ".build.info";
+                       std::filesystem::path const retail_build_info = game_path / "_retail_" / ".build.info";
+
+                       if (!std::filesystem::exists(build_info) && !std::filesystem::exists(retail_build_info))
+                       {
+                         QMessageBox::critical(this, "Error"
+                           , "The game client path does not look like a modern (CASC) client folder, "
+                             "no '.build.info' file was found.\n\n"
+                             "For a Battle.net install, point to the raw install folder "
+                             "(or its '_retail_' sub folder).");
+                         return;
+                       }
+
+                       if (std::filesystem::exists(retail_build_info) && !std::filesystem::exists(build_info))
+                       {
+                         QMessageBox::information(this, "Note"
+                           , "The client was found in the '_retail_' sub folder.\n"
+                             "Consider pointing the game client path to it directly, "
+                             "some client setups require it.");
+                       }
+
+                       // modern clients address files by FileDataID, so reading the client data
+                       // strictly requires a listfile.csv in the project folder.
+                       std::filesystem::path const listfile_target = project_path / "listfile.csv";
+
+                       if (!std::filesystem::exists(listfile_target))
+                       {
+                         bool copied = false;
+
+                         if (QMessageBox::question(this, "listfile.csv required"
+                             , "Shadowlands (CASC) projects require the community \"listfile.csv\" "
+                               "(FileDataID to file path mapping) in the project folder.\n\n"
+                               "Select one now to copy it into the project?",
+                             QMessageBox::Yes | QMessageBox::No
+                             , QMessageBox::Yes) == QMessageBox::Yes)
+                         {
+                           QString source = QFileDialog::getOpenFileName(this
+                             , "Select listfile.csv", QString(), "Listfile (*.csv);;All files (*)");
+
+                           if (!source.isEmpty())
+                           {
+                             std::error_code ec;
+                             std::filesystem::copy_file(std::filesystem::path(source.toStdString())
+                               , listfile_target
+                               , std::filesystem::copy_options::overwrite_existing
+                               , ec);
+
+                             if (ec)
+                             {
+                               QMessageBox::critical(this, "Error"
+                                 , std::string("Failed to copy the listfile into the project folder:\n"
+                                     + ec.message()).c_str());
+                               return;
+                             }
+
+                             copied = true;
+                           }
+                         }
+
+                         if (!copied)
+                         {
+                           QMessageBox::warning(this, "Missing listfile"
+                             , "The project was created without listfile.csv.\n"
+                               "Noggit will not be able to read the client data until you copy a "
+                               "listfile.csv into the project folder (you can still add it later, "
+                               "e.g. from wago.tools / wow.tools).");
+                         }
+                       }
+                     }
 
                      done(QDialog::Accepted);
                      close();

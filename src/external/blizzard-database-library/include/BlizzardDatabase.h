@@ -21,9 +21,13 @@ namespace BlizzardDatabaseLib
 		const Structures::Build _build;
 		Reader::BlizzardTableReaderFactory _blizzardTableReaderFactory;
 
+		// modern (4.x and later) clients store the game tables as .db2 files,
+		// legacy ones as .dbc files
+		const std::string _tableFileExtension;
+
 		std::map<std::string, std::shared_ptr<BlizzardDatabaseTable>> _loadedTables;
 	public:
-		BlizzardDatabase(const std::string& databaseDefinitionDirectory, const Structures::Build& build);
+		BlizzardDatabase(const std::string& databaseDefinitionDirectory, const Structures::Build& build, const std::string& tableFileExtension = ".dbc");
 
 		const BlizzardDatabaseTable& LoadTable(const std::string& tableName, std::function<std::shared_ptr<BlizzardDatabaseLib::Stream::IMemStream>(std::string const&)> file_callback);
 		bool SaveTable(const std::string& outputDirectory, const std::string& tableName, std::vector<Structures::BlizzardDatabaseRow>& rows);
