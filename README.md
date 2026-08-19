@@ -1,6 +1,37 @@
 # Releases #
 Prebuilt executable are availables in the discord: https://discord.gg/NqvM3xE5uS
 
+# Modern client support (Shadowlands / 9.1.5x) #
+Noggit can read modern (CASC based) game clients in addition to Wrath of
+the Lich King (3.3.5a) MPQ clients. When creating a project, select the
+**Shadowlands** expansion and keep the following in mind:
+
+* **Game client path** must point at a folder containing `.build.info`
+  (a Battle.net install root or its `_retail_` sub folder). The creation
+  dialog validates this for you.
+* **listfile.csv** is *required*: modern clients address game files by
+  FileDataID, so Noggit needs the community `listfile.csv`
+  (FileDataID → path mapping) in the project folder. Download it from
+  e.g. wago.tools or wow.tools — the creation dialog can copy one into
+  the project for you.
+
+What works on 9.1.5x projects:
+
+* Reading the client data from CASC storage (local install by default,
+  CDN streaming optional), with files in the project folder taking
+  priority for overriding.
+* Game database tables in the modern DB2/WDC3 format (`DBFilesClient\*`),
+  including the Map table that drives the map list.
+* Loading and inspecting 3.3.5a-format map tiles with all editor
+  tooling, and every client-agnostic tool (palettes, asset browser,
+  DB editors, texture painter, etc.).
+
+Not (yet) implemented for 9.1.5x:
+
+* Opening or saving map tiles in the modern split-ADT format. **Saving
+  is disabled on Shadowlands projects** so no map data can be corrupted.
+  Edit maps in a 3.3.5a project and upconvert the result instead.
+
 # LICENSE #
 This software is open source software licensed under GPL3, as found in
 the COPYING file.
