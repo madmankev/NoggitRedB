@@ -662,6 +662,15 @@ std::string MapCreationWizard::getDifficultyString()
 
 void MapCreationWizard::selectMap(int map_id)
 {
+  // Fix for issue #4: selecting a map in the startup menu used to load the
+  // world multiple times because several selection signals (selection
+  // changed, item clicked, difficulty combo...) all re-trigger a select.
+  // Early-out when the requested map is already the selected/loaded one.
+  if (!_is_new_record && _cur_map_id == map_id && _world)
+  {
+    return;
+  }
+
   _is_new_record = false;
 
   // int map_id = world->getMapID();

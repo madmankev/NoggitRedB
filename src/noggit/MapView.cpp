@@ -95,6 +95,7 @@
 #include <QtCore/QTimer>
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QButtonGroup>
 #include <QtWidgets/QDockWidget>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QMenuBar>
@@ -430,6 +431,29 @@ void MapView::setupViewportOverlay()
   _viewport_overlay_ui->gizmoScaleButton->setIcon(Noggit::Ui::FontNoggitIcon(Noggit::Ui::FontNoggit::Icons::GIZMO_SCALE));
   _viewport_overlay_ui->gizmoTranslateButton->setIcon(Noggit::Ui::FontNoggitIcon(Noggit::Ui::FontNoggit::Icons::GIZMO_TRANSLATE));
 
+  // Fix for issue #16:
+  //  - put the three operation buttons in an exclusive group so their
+  //    checked state can never go out of sync and the active operation
+  //    can't be toggled off by a second click
+  //  - give the buttons a strong checked-state highlight so enabled vs
+  //    disabled is clearly visible with any theme
+  auto gizmo_operation_group = new QButtonGroup(_overlay_widget);
+  gizmo_operation_group->setExclusive(true);
+  gizmo_operation_group->addButton(_viewport_overlay_ui->gizmoTranslateButton);
+  gizmo_operation_group->addButton(_viewport_overlay_ui->gizmoRotateButton);
+  gizmo_operation_group->addButton(_viewport_overlay_ui->gizmoScaleButton);
+
+  const QString gizmo_button_style = QStringLiteral(
+    "QPushButton:checked { background-color: rgba(33, 133, 208, 180);"
+    " border: 1px solid rgba(255, 255, 255, 120); border-radius: 3px; }"
+    "QPushButton:!checked { border: 1px solid rgba(128, 128, 128, 80); border-radius: 3px; }");
+
+  _viewport_overlay_ui->gizmoVisibleButton->setStyleSheet(gizmo_button_style);
+  _viewport_overlay_ui->gizmoModeButton->setStyleSheet(gizmo_button_style);
+  _viewport_overlay_ui->gizmoTranslateButton->setStyleSheet(gizmo_button_style);
+  _viewport_overlay_ui->gizmoRotateButton->setStyleSheet(gizmo_button_style);
+  _viewport_overlay_ui->gizmoScaleButton->setStyleSheet(gizmo_button_style);
+
   connect(this, &MapView::resized
     ,[this]()
           {
@@ -453,13 +477,19 @@ void MapView::setupViewportOverlay()
 
   connect(_viewport_overlay_ui->gizmoModeButton, &QPushButton::clicked, [this]()
   {
+      // Fix for issue #16: also reflect the current mode on the button icon
+      // and tooltip so the state is readable at a glance.
       if (_viewport_overlay_ui->gizmoModeButton->isChecked())
       {
           _gizmo_mode = ImGuizmo::MODE::WORLD;
+          _viewport_overlay_ui->gizmoModeButton->setIcon(Noggit::Ui::FontNoggitIcon(Noggit::Ui::FontNoggit::Icons::GIZMO_GLOBAL));
+          _viewport_overlay_ui->gizmoModeButton->setToolTip("Gizmo mode: world");
       }
       else
       {
           _gizmo_mode = ImGuizmo::MODE::LOCAL;
+          _viewport_overlay_ui->gizmoModeButton->setIcon(Noggit::Ui::FontNoggitIcon(Noggit::Ui::FontNoggit::Icons::GIZMO_LOCAL));
+          _viewport_overlay_ui->gizmoModeButton->setToolTip("Gizmo mode: local");
       }
   });
 
@@ -4274,7 +4304,9 @@ void MapView::save(save_mode mode)
       dbc->save();
     }
 
-    NOGGIT_ACTION_MGR->purge();
+    // Fix for issue #55: saving used to erase the whole undo/redo history
+    // (Ctrl+Z) by purging the action manager. The action history is kept
+    // alive now so users can still undo changes after saving.
     AsyncLoader::instance->reset_object_fail();
 
     _main_window->statusBar()->showMessage("Map saved", 2000);

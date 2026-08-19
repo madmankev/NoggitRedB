@@ -1412,9 +1412,9 @@ void MapTile::setHeightmapImage(QImage const& baseimage, float min_height, float
 
       registerChunkUpdate(ChunkUpdateFlags::VERTEX);
 
-      // else we recalculate after tiled edges updates
-      if (!tiledEdges)
-        chunk->recalcNorms();
+      // normals are all recalculated in a dedicated pass at the end of
+      // the function, once every vertex has reached its final height
+      // (issue #33)
     }
   }
 
@@ -1479,16 +1479,26 @@ void MapTile::setHeightmapImage(QImage const& baseimage, float min_height, float
         }
       );
     }
-  
-    for (int k = 0; k < 16; ++k)
+  }
+
+  // Fix for issue #33: recalculate the normals only once every vertex of
+  // the tile (including the edges synced with neighbor tiles) has reached
+  // its final height. Recalculating per chunk during the import used to
+  // read the not-yet-imported heights of neighboring chunks, producing
+  // stale shading, and the tiled edges path never recalculated normals
+  // for the interior chunks at all.
+  for (int k = 0; k < 16; ++k)
+  {
+    for (int l = 0; l < 16; ++l)
     {
-        for (int l = 0; l < 16; ++l)
-        {
-            MapChunk* chunk = getChunk(k, l);
-            // chunk->recalcNorms();
-        }
+      MapChunk* chunk = getChunk(k, l);
+      chunk->recalcNorms();
     }
   }
+
+  // Make sure both the vertex and normal data reach the renderer even if
+  // one of the two flags got consumed in between.
+  registerChunkUpdate(ChunkUpdateFlags::VERTEX | ChunkUpdateFlags::NORMALS);
 }
 
 void MapTile::setAlphaImage(QImage const& baseimage, unsigned layer, bool cleanup)

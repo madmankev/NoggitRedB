@@ -195,7 +195,6 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
         case ImGuizmo::ROTATE:
         {
           auto rot_euler = glm::degrees(glm::eulerAngles(new_orientation).operator*=(-1.f));
-          auto rot_euler_pivot = glm::eulerAngles(new_orientation);
 
           if (!_use_multiselection_pivot)
           {
@@ -203,62 +202,17 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
           }
           else
           {
-            //LogDebug << rot_euler.x << " " << rot_euler.y << " " << rot_euler.z << std::endl;
+            // Fix for issue #60: the old math mixed degrees and radians
+            // (atan(sin(beta) / sqrt(1 - sin(beta)^2)) with beta in degrees)
+            // and built a quaternion out of raw euler angles, which is not a
+            // valid rotation. Positions slowly drifted away from the pivot
+            // as a result. Apply the yaw delta directly and rotate the
+            // position around the pivot with the gizmo's exact delta matrix.
+            rotation.y += math::degrees(rot_euler.y)._;
 
-            /*float alpha = math::degrees(rot_euler.x)._;
-            float beta = math::degrees(rot_euler.y)._;
-            float gamma = math::degrees(rot_euler.z)._;
-
-            glm::mat3 rotation_matrix = glm::mat3(
-                        cos(beta)*cos(gamma),                                    -cos(beta)*sin(gamma),                                   sin(beta),
-                        cos(alpha)*sin(gamma) + cos(gamma)*sin(alpha)*sin(beta), cos(alpha)*cos(gamma) - sin(alpha)*sin(beta)*sin(gamma), -cos(beta)*sin(alpha),
-                        sin(alpha)*sin(gamma) - cos(alpha)*cos(gamma)*sin(beta), cos(gamma)*sin(alpha) + cos(alpha)*sin(beta)*sin(gamma), cos(alpha)*cos(beta)
-                        );
-
-            rotation.x += atan(-rotation_matrix[1].z / rotation_matrix[2].z);
-            rotation.z += atan(-rotation_matrix[0].y / rotation_matrix[0].x);*/
-
-            float beta = math::degrees(rot_euler.y)._;
-            rotation.y += atan(sin(beta) / (sqrt(1 - pow(sin(beta), 2))));
-
-            // building model matrix
-            glm::mat4 model_transform = object_matrix;
-
-            // only translation of pivot
-            glm::mat4 transformed_pivot = pivot_matrix;
-
-            // model matrix relative to translated pivot
-            glm::mat4 model_transform_rel = glm::inverse(transformed_pivot) * model_transform;
-
-            // rotate multiselection in same direction as user want
-            glm::mat4 gizmo_rotation = glm::mat4_cast(glm::quat(new_orientation.w, glm::eulerAngles(new_orientation).operator*=(-1.f)));
-
-            glm::mat4 _transformed_pivot_rot = transformed_pivot * gizmo_rotation;
-
-            // apply transform to model matrix
-            glm::mat4 result_matrix = _transformed_pivot_rot * model_transform_rel;
-
-            glm::vec3 rot_result_scale;
-            glm::quat rot_result_orientation;
-            glm::vec3 rot_result_translation;
-            glm::vec3 rot_result_skew_;
-            glm::vec4 rot_result_perspective_;
-
-            glm::decompose(result_matrix,
-                           rot_result_scale,
-                           rot_result_orientation,
-                           rot_result_translation,
-                           rot_result_skew_,
-                           rot_result_perspective_
-            );
-
-            rot_result_orientation = glm::conjugate(rot_result_orientation);
-
-            auto rot_result_orientation_euler = glm::degrees(glm::eulerAngles(rot_result_orientation));
-
-            pos = {rot_result_translation.x, rot_result_translation.y, rot_result_translation.z};
-            //rotation = {rot_result_orientation_euler.x, rot_result_orientation_euler.y, rot_result_orientation_euler.z};
-
+            glm::vec3 const rel_pos = pos - _multiselection_pivot;
+            glm::vec3 const rotated_rel_pos = glm::vec3(glm_transform_mat * glm::vec4(rel_pos, 0.0f));
+            pos = _multiselection_pivot + rotated_rel_pos;
           }
 
           break;

@@ -35,6 +35,8 @@
 #include <QLineEdit>
 #include <QSettings>
 #include <QApplication>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QtWidgets/qcombobox.h>
 #include <QtWidgets/QDoubleSpinBox>
 #include <QtWidgets/qgroupbox.h>
@@ -161,12 +163,33 @@ namespace Noggit
       // clipboard_box->setWindowIcon(Noggit::Ui::FontAwesomeIcon(Noggit::Ui::FontAwesome::clipboard));
       auto clipboard_layout = new QVBoxLayout(clipboard_box);
 
+      auto filename_layout = new QHBoxLayout;
+
       _filename = new QLabel(this);
       _filename->setWordWrap(true);
+      // Fix for issue #37: make the model path selectable and add a
+      // button copying it straight to the clipboard
+      _filename->setTextInteractionFlags(Qt::TextSelectableByMouse);
       _filename->setText("Empty (0 objects copied)");
       layout->addWidget(clipboard_box);
 
-      clipboard_layout->addWidget(_filename);
+      filename_layout->addWidget(_filename, 1);
+
+      auto copy_path_button = new QToolButton(this);
+      copy_path_button->setIcon(Noggit::Ui::FontAwesomeIcon(Noggit::Ui::FontAwesome::copy));
+      copy_path_button->setToolTip("Copy the model path to the clipboard");
+      copy_path_button->setFixedSize(20, 20);
+      filename_layout->addWidget(copy_path_button, 0);
+
+      clipboard_layout->addLayout(filename_layout);
+
+      connect(copy_path_button, &QToolButton::clicked, [=]()
+        {
+          if (!_clipboard_model_path.empty())
+          {
+            QGuiApplication::clipboard()->setText(QString::fromStdString(_clipboard_model_path));
+          }
+        });
 
       auto *copyBox = new ExpanderWidget( this);
       copyBox->setExpanderTitle("Copy options");
@@ -908,7 +931,9 @@ namespace Noggit
        // _model_instance_created = new_selection;
 
       std::stringstream ss;
-      
+
+      _clipboard_model_path.clear();
+
       if (_model_instance_created.empty())
       {
         _filename->setText("Empty (0 objects copied)");
@@ -922,7 +947,8 @@ namespace Noggit
         auto selectedObject = _model_instance_created.front();
         if (selectedObject.index() == eEntry_Object)
         {
-          ss << std::get<selected_object_type>(selectedObject)->instance_model()->file_key().filepath();
+          _clipboard_model_path = std::get<selected_object_type>(selectedObject)->instance_model()->file_key().filepath();
+          ss << _clipboard_model_path;
         }
         else
         {

@@ -12,6 +12,7 @@
 #include <QImage>
 
 #include <array>
+#include <limits>
 #include <map>
 #include <memory>
 #include <unordered_set>
@@ -156,7 +157,8 @@ public:
   glm::uvec2 getUnitIndextAt(glm::vec3 pos);
 
   //! \todo implement Action stack for these
-  bool changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius);
+  bool changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius
+    , float min_height = std::numeric_limits<float>::lowest(), float max_height = std::numeric_limits<float>::max());
   bool flattenTerrain(glm::vec3 const& pos, float remain, float radius, int BrushType, flatten_mode const& mode, const glm::vec3& origin, math::degrees angle, math::degrees orientation);
   bool blurTerrain ( glm::vec3 const& pos, float remain, float radius, int BrushType, flatten_mode const& mode
                    /*, std::function<std::optional<float>(float, float)> height*/
@@ -164,7 +166,8 @@ public:
 
   bool changeTerrainProcessVertex(glm::vec3 const& pos, glm::vec3 const& vertex, float& dt, float radiusOuter, float radiusInner, int brushType);
   auto stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiusOuter
-  , float radiusInner, int brushType, bool sculpt) -> void;
+  , float radiusInner, int brushType, bool sculpt
+  , float min_height = std::numeric_limits<float>::lowest(), float max_height = std::numeric_limits<float>::max()) -> void;
   void selectVertex(glm::vec3 const& pos, float radius, std::unordered_set<glm::vec3*>& vertices);
   void fixVertices(std::unordered_set<glm::vec3*>& selected);
   // for the vertex tool

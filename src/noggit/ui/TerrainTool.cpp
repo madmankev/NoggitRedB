@@ -13,11 +13,16 @@
 #include <QtWidgets/QButtonGroup>
 #include <QtWidgets/qcheckbox.h>
 #include <QtWidgets/QDial>
+#include <QtWidgets/QDoubleSpinBox>
+#include <QtWidgets/QFormLayout>
 #include <QtWidgets/QGridLayout>
 #include <QtWidgets/QGroupBox>
 #include <QtWidgets/QRadioButton>
 #include <QtWidgets/QSlider>
 #include <QtWidgets/QVBoxLayout>
+
+#include <algorithm>
+#include <limits>
 
 #define _USE_MATH_DEFINES
 #include <math.h>
@@ -128,6 +133,32 @@ namespace Noggit
       settings_layout->addWidget(_snap_wmo_objects_chkbox);
 
       layout->addWidget(settings_group);
+
+      // Min/Max blending (issue #30): when enabled, raising blends the
+      // terrain towards the max height and lowering blends it towards the
+      // min height, similarly to sculpting flatten brushes
+      _minmax_group = new QGroupBox("Min/Max blending", this);
+      _minmax_group->setCheckable(true);
+      _minmax_group->setChecked(false);
+
+      auto minmax_layout (new QFormLayout(_minmax_group));
+
+      _min_height_spin = new QDoubleSpinBox(_minmax_group);
+      _min_height_spin->setRange(-100000.0, 100000.0);
+      _min_height_spin->setDecimals(2);
+      _min_height_spin->setValue(0.0);
+      _min_height_spin->setToolTip("Vertices can't go below this height while lowering,\nthey are blended up to it instead.");
+
+      _max_height_spin = new QDoubleSpinBox(_minmax_group);
+      _max_height_spin->setRange(-100000.0, 100000.0);
+      _max_height_spin->setDecimals(2);
+      _max_height_spin->setValue(100.0);
+      _max_height_spin->setToolTip("Vertices can't go above this height while raising,\nthey are blended down to it instead.");
+
+      minmax_layout->addRow("Min height:", _min_height_spin);
+      minmax_layout->addRow("Max height:", _max_height_spin);
+
+      layout->addWidget(_minmax_group);
 
       _image_mask_group = new Noggit::Ui::Tools::ImageMaskSelector(map_view, this);
       _mask_image = _image_mask_group->getPixmap()->toImage();
@@ -253,6 +284,14 @@ namespace Noggit
       float radius =  static_cast<float>(_radius_slider->value());
       if(_edit_type != eTerrainType_Vertex)
       {
+        float min_height = minmaxBlendingEnabled() ? blendMinHeight() : std::numeric_limits<float>::lowest();
+        float max_height = minmaxBlendingEnabled() ? blendMaxHeight() : std::numeric_limits<float>::max();
+
+        if (min_height > max_height)
+        {
+          std::swap(min_height, max_height);
+        }
+
         if (_image_mask_group->isEnabled())
         {
           // store the ground height diff at center of all objects hit before editing it
@@ -260,7 +299,8 @@ namespace Noggit
               , _snap_wmo_objects_chkbox->isChecked(), _snap_m2_objects_chkbox->isChecked());
 
           world->stamp(pos, dt * _speed_slider->value(), &_mask_image, radius,
-                       _inner_radius_slider->value(),  _edit_type, _image_mask_group->getBrushMode());
+                       _inner_radius_slider->value(),  _edit_type, _image_mask_group->getBrushMode(),
+                       min_height, max_height);
 
           // re apply the ground height diff to the objects
           for (auto pair : objects_ground_distance)
@@ -272,7 +312,8 @@ namespace Noggit
         }
         else
         {
-          world->changeTerrain(pos, dt * _speed_slider->value(), radius, _edit_type, _inner_radius_slider->value());
+          world->changeTerrain(pos, dt * _speed_slider->value(), radius, _edit_type, _inner_radius_slider->value(),
+                               min_height, max_height);
 
           world->changeObjectsWithTerrain(pos, dt * _speed_slider->value(), radius, _edit_type, _inner_radius_slider->value()
               , _snap_wmo_objects_chkbox->isChecked(), _snap_m2_objects_chkbox->isChecked());
@@ -295,6 +336,21 @@ namespace Noggit
           }
         }
       }
+    }
+
+    bool TerrainTool::minmaxBlendingEnabled() const
+    {
+      return _minmax_group->isChecked();
+    }
+
+    float TerrainTool::blendMinHeight() const
+    {
+      return static_cast<float>(_min_height_spin->value());
+    }
+
+    float TerrainTool::blendMaxHeight() const
+    {
+      return static_cast<float>(_max_height_spin->value());
     }
 
     void TerrainTool::moveVertices (World* world, float dt)

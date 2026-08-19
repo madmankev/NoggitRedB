@@ -3,6 +3,8 @@
 #pragma once
 #include <noggit/Selection.h>
 
+#include <string>
+
 #include <QWidget>
 
 class MapView;
@@ -112,6 +114,7 @@ namespace Noggit
 
       QButtonGroup* pasteModeGroup;
       QLabel* _filename;
+      std::string _clipboard_model_path;
 
       QLabel* _selection_groups_info;
 

@@ -1203,8 +1203,9 @@ void WorldRender::draw (glm::mat4x4 const& model_view
     math::degrees orient = math::degrees(render_settings.orientation);
     math::degrees incl = math::degrees(render_settings.angle);
     glm::vec4 color = cursor_color;
-    // color.w = 0.5f;
-    color.w = 0.75f;
+    // Fix for issue #25: 0.75 was so opaque the angle/lock square hid the
+    // terrain under it, use half transparency instead
+    color.w = 0.5f;
 
     float radius = 1.2f * render_settings.brush_radius;
 
@@ -2283,6 +2284,9 @@ bool WorldRender::saveMinimap(TileIndex const& tile_idx, MinimapRenderSettings* 
     {
         std::string map_name = gMapDB.getByID(_world->mapIndex._map_id).getString(MapDB::InternalName);
         auto sstream = std::stringstream();
+        // Issue #57: md5translate.trs tile keys follow the wowdev.wiki/TRS
+        // format "map_%d_%02d.blp": the X coordinate is NOT zero-padded,
+        // the Y (z here) coordinate IS zero-padded to two digits.
         sstream << map_name << "\\map" << tile_idx.x << "_" << std::setfill('0') << std::setw(2) << tile_idx.z << ".blp";
         std::string tilename_left = sstream.str();
         auto& minimap_md5translate = Noggit::Application::NoggitApplication::instance()->clientData()->_minimap_md5translate;

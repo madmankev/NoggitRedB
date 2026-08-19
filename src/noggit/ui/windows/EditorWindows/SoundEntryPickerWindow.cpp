@@ -233,21 +233,7 @@ namespace Noggit
 
             connect(add_file_button, &QPushButton::clicked, [=]() {
 
-                int new_row_id = _files_listview->count();
-                if (new_row_id > 9)
-                    return; // can't have more than 10
-
-                _filenames_ledits[new_row_id] = new QLineEdit(); // set parent in the widget class
-                _filenames_ledits[new_row_id]->setText("your_sound_file.mp3");
-                auto file_widget = new SoundFileWListWidgetItem(_filenames_ledits[new_row_id], _directory_ledit->text().toStdString());
-
-                auto item = new QListWidgetItem(_files_listview);
-                _files_listview->setItemWidget(item, file_widget);
-                item->setSizeHint(QSize(_files_listview->width(), _files_listview->height() / 10));
-
-                _files_listview->addItem(item);
-
-                update_files_count();
+                add_file_item("your_sound_file.mp3");
 
                 });
 
@@ -356,15 +342,7 @@ namespace Noggit
                     if (filename.empty())
                         continue;
 
-                    _filenames_ledits[i] = new QLineEdit(); // set parent in the widget class
-                    _filenames_ledits[i]->setText(filename.c_str());
-                    auto file_widget = new SoundFileWListWidgetItem(_filenames_ledits[i], _directory_ledit->text().toStdString());
-
-                    auto item = new QListWidgetItem(_files_listview);
-                    _files_listview->setItemWidget(item, file_widget);
-                    item->setSizeHint(QSize(_files_listview->width(), _files_listview->height() / 10) );
-
-                    _files_listview->addItem(item);
+                    add_file_item(filename);
                 }
                 update_files_count();
 
@@ -399,11 +377,17 @@ namespace Noggit
 
                 record.writeString(SoundEntriesDB::Name, _name_ledit->text().toStdString());
 
-                // _files_listview->count()
+                // Fix for issue #64: the filenames are now read back from the
+                // row widgets themselves. The old code indexed a sparse
+                // QLineEdit array keyed by DBC slot which broke (wrong slots
+                // or crashes) once rows below a gap were removed.
                 int i = 0;
                 for (;i < _files_listview->count(); i++)
                 {
-                    record.writeString(SoundEntriesDB::Filenames + i, _filenames_ledits[i]->text().toStdString());
+                    auto item = _files_listview->item(i);
+                    auto file_widget = qobject_cast<SoundFileWListWidgetItem*>(_files_listview->itemWidget(item));
+
+                    record.writeString(SoundEntriesDB::Filenames + i, file_widget ? file_widget->filename() : "");
                     record.write(SoundEntriesDB::Freq + i, 1); // TODO. but in 99.9% 1 is fine
                 }
                 for (;i < 10; i++) // clean up unset entries
@@ -440,6 +424,43 @@ namespace Noggit
 
         }
 
+        void SoundEntryPickerWindow::add_file_item(const std::string& filename)
+        {
+            if (_files_listview->count() > 9)
+                return; // can't have more than 10
+
+            auto filename_ledit = new QLineEdit(); // parented by the row widget class
+            filename_ledit->setText(filename.c_str());
+            auto file_widget = new SoundFileWListWidgetItem(filename_ledit, _directory_ledit->text().toStdString());
+
+            auto item = new QListWidgetItem(_files_listview);
+            _files_listview->setItemWidget(item, file_widget);
+            item->setSizeHint(QSize(_files_listview->width(), _files_listview->height() / 10));
+
+            _files_listview->addItem(item);
+
+            connect(file_widget, &SoundFileWListWidgetItem::removeRequested, this, &SoundEntryPickerWindow::remove_file_item);
+
+            update_files_count();
+        }
+
+        void SoundEntryPickerWindow::remove_file_item(SoundFileWListWidgetItem* row_widget)
+        {
+            // Fix for issue #64
+            for (int i = 0; i < _files_listview->count(); ++i)
+            {
+                auto item = _files_listview->item(i);
+                if (_files_listview->itemWidget(item) != row_widget)
+                    continue;
+
+                _files_listview->removeItemWidget(item);
+                delete _files_listview->takeItem(i);
+
+                update_files_count();
+                return;
+            }
+        }
+
         void SoundEntryPickerWindow::update_files_count()
         {
             int file_count = _files_listview->count();
@@ -451,12 +472,11 @@ namespace Noggit
 
         SoundFileWListWidgetItem::SoundFileWListWidgetItem(QLineEdit* filename_ledit, std::string dirpath, QWidget* parent) // std::string filename
         : QWidget(parent)
+        , _filename_ledit(filename_ledit)
         {
             auto layout = new QHBoxLayout(this);
             layout->addWidget(new QLabel("File:", this));
 
-            // auto lol = _filenames_ledits[i];
-            // auto _filename_ledit = new QLineEdit(filename.c_str(), this);
             filename_ledit->setParent(this);
             filename_ledit->setFixedHeight(30);
             layout->addWidget(filename_ledit);
@@ -467,11 +487,12 @@ namespace Noggit
             play_sound_button->setFixedSize(20, 20);
             layout->addWidget(play_sound_button);
 
-            // auto removefile_button = new QToolButton(this);
-            // removefile_button->setIcon(Noggit::Ui::FontAwesomeIcon(FontAwesome::windowclose));
-            //removefile_button->setFixedSize(removefile_button->size() * 0.5);
-            // removefile_button->setFixedSize(20, 20);
-            // layout->addWidget(removefile_button);
+            // Fix for issue #64: add a per-row remove button so sound file
+            // rows can actually be deleted from an entry.
+            auto removefile_button = new QToolButton(this);
+            removefile_button->setIcon(Noggit::Ui::FontAwesomeIcon(FontAwesome::times));
+            removefile_button->setFixedSize(20, 20);
+            layout->addWidget(removefile_button);
 
 
             connect(play_sound_button, &QPushButton::clicked, [=]() {
@@ -483,6 +504,15 @@ namespace Noggit
                     sound_player->show();
                 }
                 });
+
+            connect(removefile_button, &QToolButton::clicked, [this]() {
+                emit removeRequested(this);
+                });
+        }
+
+        std::string SoundFileWListWidgetItem::filename() const
+        {
+            return _filename_ledit->text().toStdString();
         }
 
 }

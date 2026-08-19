@@ -9,6 +9,7 @@
 #include <noggit/world_tile_update_queue.hpp>
 #include <noggit/world_model_instances_storage.hpp>
 #include <noggit/ContextObject.hpp>
+#include <limits>
 #include <optional>
 #include <string>
 #include <unordered_set>
@@ -215,7 +216,8 @@ public:
     void for_tile_at_force(const TileIndex& pos, Fun&&);
 
   void changeObjectsWithTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius, bool iter_wmos_ = true, bool iter_m2s = true);
-  void changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius);
+  void changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius
+    , float min_height = std::numeric_limits<float>::lowest(), float max_height = std::numeric_limits<float>::max());
   std::vector<selected_object_type> getObjectsInRange(glm::vec3 const& pos, float radius, bool ignore_height = true, bool iter_wmos_ = true, bool iter_m2s = true);
   void changeShader(glm::vec3 const& pos, glm::vec4 const& color, float change, float radius, bool editMode);
   void stampShader(glm::vec3 const& pos, glm::vec4 const& color, float change, float radius, bool editMode, QImage* img, bool paint, bool use_image_colors);
@@ -300,7 +302,8 @@ public:
   );
 
   auto stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiusOuter
-  , float radiusInner, int BrushType, bool sculpt) -> void;
+  , float radiusInner, int BrushType, bool sculpt
+  , float min_height = std::numeric_limits<float>::lowest(), float max_height = std::numeric_limits<float>::max()) -> void;
 
   // add a m2 instance to the world (needs to be positioned already), return the uid
   std::uint32_t add_model_instance(ModelInstance model_instance, bool from_reloading, bool action);

@@ -19,6 +19,7 @@
 #include <QDateTime>
 #include <QSettings>
 
+#include <cmath>
 #include <fstream>
 
 namespace Noggit
@@ -498,6 +499,12 @@ namespace Noggit
 
         float numpad_moveratio = 0.001f;
 
+        // Fix for issue #43: numpad rotation/scaling used to apply a fixed
+        // amount every frame, which made the effective speed depend on the
+        // framerate. Scale the amount by the frame delta instead, normalized
+        // so that 60 FPS (the historical default) behaves as before.
+        float frame_time_ratio = deltaTime * 60.f;
+
         if (mapView()->getWorld()->has_selection())
         {
             auto mv = mapView();
@@ -528,7 +535,7 @@ namespace Noggit
             {
                 NOGGIT_ACTION_MGR->beginAction(mv, Noggit::ActionFlags::eOBJECTS_TRANSFORMED,
                     Noggit::ActionModalityControllers::eSCALE);
-                world->scale_selected_models(_keys * numpad_moveratio / 50.f, World::object_scaling_type::add);
+                world->scale_selected_models(_keys * numpad_moveratio / 50.f * frame_time_ratio, World::object_scaling_type::add);
                 updateRotationEditor();
             }
             if (_keyr != 0.f)
@@ -536,7 +543,7 @@ namespace Noggit
                 NOGGIT_ACTION_MGR->beginAction(mv, Noggit::ActionFlags::eOBJECTS_TRANSFORMED,
                     Noggit::ActionModalityControllers::eROTATE);
                 world->rotate_selected_models(math::degrees(0.f)
-                    , math::degrees(_keyr * numpad_moveratio * 5.f)
+                    , math::degrees(_keyr * numpad_moveratio * 5.f * frame_time_ratio)
                     , math::degrees(0.f)
                     , _use_median_pivot_point.get()
                 );
@@ -586,9 +593,14 @@ namespace Noggit
                             NOGGIT_ACTION_MGR->beginAction(mv, Noggit::ActionFlags::eOBJECTS_TRANSFORMED,
                                 Noggit::ActionModalityControllers::eMMB);
 
-                            if ((_mh <= 0.01f && _mh >= -0.01f) && (_mv <= 0.01f && _mv >= -0.01f))
+                            // Fix for issue #23: the movement used to be
+                            // applied only while the mouse was NOT moving
+                            // (inverted condition) and the horizontal and
+                            // vertical mouse deltas were mapped to the wrong
+                            // camera axis (x/y swapped + wrong sign).
+                            if (std::fabs(_mh) > 0.01f || std::fabs(_mv) > 0.01f)
                             {
-                                glm::vec3 _vec = (_mh * params.dirUp + _mv * params.dirRight);
+                                glm::vec3 _vec = (-_mh * params.dirRight + _mv * params.dirUp);
                                 world->move_selected_models(_vec * 500.f);
                             }
                         }

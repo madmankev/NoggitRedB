@@ -171,8 +171,24 @@ bool Model::animated_mesh() const
 [[nodiscard]]
 bool Model::particles_only() const
 { // some particle emitters like wisps in ashenvale have a few vertices but no collision, using that to detect
-  return !_particles.empty()
-    && (_renderer.renderPasses().empty() || _vertices.empty() || !nBoundingTriangles);
+  // Fix for issue #65: models like waterfalls also have particles and no
+  // collision, but they do have regular non-collision triangles and were
+  // wrongly replaced by the placeholder red box. Only treat a model as
+  // particles-only when it has no renderable geometry at all, or when all
+  // of its triangles are collision (bounding) triangles.
+  if (_particles.empty())
+  {
+    return false;
+  }
+
+  if (_renderer.renderPasses().empty() || _vertices.empty())
+  {
+    return true;
+  }
+
+  std::size_t render_triangle_count = _indices.size() / 3;
+  return render_triangle_count == 0
+    || render_triangle_count == static_cast<std::size_t>(nBoundingTriangles);
 }
 
 [[nodiscard]]

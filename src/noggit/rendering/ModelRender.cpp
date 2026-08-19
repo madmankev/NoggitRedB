@@ -466,7 +466,11 @@ void ModelRender::fixShaderIDLayer()
             && pass.texture_combo_index == first_pass->texture_combo_index
             )
         {
-          if (_model->_transparency_lookup[pass.transparency_combo_index] == _model->_transparency_lookup[first_pass->transparency_combo_index])
+          // Fix for issue #27: guard the transparency lookups against
+          // out-of-range combo indices (crashed with some models)
+          if (_model->_transparency_lookup.size() > pass.transparency_combo_index
+          && _model->_transparency_lookup.size() > first_pass->transparency_combo_index
+          && _model->_transparency_lookup[pass.transparency_combo_index] == _model->_transparency_lookup[first_pass->transparency_combo_index])
           {
             pass.shader_id = 0x8000;
             first_pass->shader_id = 0x8001;
@@ -537,7 +541,10 @@ void ModelRender::fixShaderIDLayer()
           {
             some_flags &= 0xFF00;
           }
-          else  if (_model->_transparency_lookup[pass.transparency_combo_index] == _model->_transparency_lookup[first_pass->transparency_combo_index])
+          // Fix for issue #27: same out-of-range guard as above
+          else  if (_model->_transparency_lookup.size() > pass.transparency_combo_index
+          && _model->_transparency_lookup.size() > first_pass->transparency_combo_index
+          && _model->_transparency_lookup[pass.transparency_combo_index] == _model->_transparency_lookup[first_pass->transparency_combo_index])
           {
             // current pass ignored/removed
             pass.shader_id = 0x8000;
@@ -828,7 +835,11 @@ bool ModelRenderPass::prepareDraw(OpenGL::Scoped::use_program& m2_shader, Model 
   }
 
   // opacity
-  if (transparency_combo_index != 0xFFFF && transparency_combo_index < m->_transparency_lookup.size())
+  // Fix for issue #27: the lookup content itself can be out of range
+  // (-1 or beyond _transparency) on some models, validate it as well
+  if (transparency_combo_index != 0xFFFF && transparency_combo_index < m->_transparency_lookup.size()
+      && m->_transparency_lookup[transparency_combo_index] >= 0
+      && static_cast<size_t>(m->_transparency_lookup[transparency_combo_index]) < m->_transparency.size())
   {
     auto& transparency (m->_transparency[m->_transparency_lookup[transparency_combo_index]].trans);
     if (transparency.uses (0))

@@ -34,9 +34,14 @@ namespace Noggit
             Q_OBJECT
         public:
             SoundFileWListWidgetItem(QLineEdit* filename_ledit, std::string dirpath, QWidget* parent = nullptr);
-            // QLineEdit* _filename_ledit;
-        private:
 
+            std::string filename() const;
+
+        Q_SIGNALS:
+            void removeRequested(SoundFileWListWidgetItem* row_widget);
+
+        private:
+            QLineEdit* _filename_ledit;
         };
 
         class SoundEntryPickerWindow : public QWidget
@@ -67,8 +72,6 @@ namespace Noggit
             QLineEdit* _directory_ledit;
             QLabel* _filescount_lbl;
             QListWidget* _files_listview;
-            QLineEdit* _filenames_ledits[10]{ 0 };
-            QSpinBox* _freqs_spinboxes[10]{ 0 };
 
             bool _flag12; // 7 users and unknown definition, not adding it to the UI.
 
@@ -79,6 +82,8 @@ namespace Noggit
             void select_entry(int id);
             void save_entry(int entry_id);
             void update_files_count();
+            void add_file_item(const std::string& filename);
+            void remove_file_item(SoundFileWListWidgetItem* row_widget);
             // void duplicate_entry();
         };
 

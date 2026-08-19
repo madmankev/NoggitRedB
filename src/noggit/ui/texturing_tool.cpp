@@ -1,4 +1,4 @@
-﻿// This file is part of Noggit3, licensed under GNU General Public License (version 3).
+// This file is part of Noggit3, licensed under GNU General Public License (version 3).
 
 #include <noggit/application/Configuration/NoggitApplicationConfiguration.hpp>
 #include <noggit/application/NoggitApplication.hpp>
@@ -103,6 +103,9 @@ namespace Noggit
       _pressure_slider->setPrefix("");
       _pressure_slider->setRange (0, 1.0f);
       _pressure_slider->setDecimals (2);
+      // Fix for issue #24: without an explicit single step the mouse wheel
+      // scrolled by 1.0 on a [0, 1] range, snapping straight to min or max.
+      _pressure_slider->setSingleStep (0.05);
       _pressure_slider->setValue (0.9f);
       slider_layout_left->addWidget (_pressure_slider);
 

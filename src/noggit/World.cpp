@@ -1467,7 +1467,8 @@ glm::vec3 World::pickShaderColor(glm::vec3 const& pos)
 }
 
 auto World::stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiusOuter
-, float radiusInner, int brushType, bool sculpt) -> void
+, float radiusInner, int brushType, bool sculpt
+, float min_height, float max_height) -> void
 {
   ZoneScoped;
   auto action = NOGGIT_CUR_ACTION;
@@ -1480,7 +1481,7 @@ auto World::stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiu
                             auto action = NOGGIT_CUR_ACTION;
                             action->registerChunkTerrainChange(chunk);
                             action->setBlockCursor(!sculpt);
-                            chunk->stamp(pos, dt, img, radiusOuter, radiusInner, brushType, sculpt); return true;
+                            chunk->stamp(pos, dt, img, radiusOuter, radiusInner, brushType, sculpt, min_height, max_height); return true;
                           }
                           , [this](MapChunk* chunk) -> void
                           {
@@ -1613,7 +1614,8 @@ void World::changeObjectsWithTerrain(glm::vec3 const& pos, float change, float r
   }
 }
 
-void World::changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius)
+void World::changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius
+                        , float min_height, float max_height)
 {
   ZoneScoped;
 
@@ -1622,7 +1624,7 @@ void World::changeTerrain(glm::vec3 const& pos, float change, float radius, int 
     , [&] (MapChunk* chunk)
       {
         NOGGIT_CUR_ACTION->registerChunkTerrainChange(chunk);
-        return chunk->changeTerrain(pos, change, radius, BrushType, inner_radius);
+        return chunk->changeTerrain(pos, change, radius, BrushType, inner_radius, min_height, max_height);
       }
     , [this] (MapChunk* chunk)
       {

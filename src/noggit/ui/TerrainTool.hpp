@@ -14,6 +14,7 @@ class MapView;
 class QButtonGroup;
 class QCheckBox;
 class QDial;
+class QDoubleSpinBox;
 class QGroupBox;
 class QSlider;
 
@@ -75,6 +76,11 @@ namespace Noggit
 
       QImage* getMaskImage();;
 
+      // Min/Max blending (issue #30)
+      bool minmaxBlendingEnabled() const;
+      float blendMinHeight() const;
+      float blendMaxHeight() const;
+
       QSize sizeHint() const override;
 
       eTerrainType _edit_type;
@@ -111,6 +117,10 @@ namespace Noggit
       Noggit::Ui::Tools::UiCommon::ExtendedSlider* _speed_slider;
       QCheckBox* _snap_m2_objects_chkbox;
       QCheckBox* _snap_wmo_objects_chkbox;
+
+      QGroupBox* _minmax_group;
+      QDoubleSpinBox* _min_height_spin;
+      QDoubleSpinBox* _max_height_spin;
 
       QSlider* _angle_slider;
       QDial* _orientation_dial;

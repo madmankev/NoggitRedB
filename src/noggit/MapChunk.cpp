@@ -20,6 +20,7 @@
 #include <noggit/World.h>
 #include <util/sExtendableArray.hpp>
 
+#include <cmath>
 #include <limits>
 #include <map>
 #include <QImage>
@@ -151,6 +152,32 @@ MapChunk::MapChunk(MapTile* maintile, BlizzardArchive::ClientFile* f, bool bigAl
     zbase = zbase*-1.0f + ZEROPOINT;
     xbase = xbase*-1.0f + ZEROPOINT;
 
+    // Fix for issue #47: validate the file-stored chunk coordinates against
+    // the position implied by the tile index and the chunk's index inside
+    // the file. ADTs that were moved or renamed keep stale offsets, and the
+    // cursor raycast (which uses the heightmap data) then disagrees with the
+    // rendering, making the tile unselectable.
+    {
+      int const expected_px = chunk_idx / 16;
+      int const expected_py = chunk_idx % 16;
+      float const expected_xbase = maintile->xbase + expected_px * CHUNKSIZE;
+      float const expected_zbase = maintile->zbase + expected_py * CHUNKSIZE;
+
+      if (px != expected_px || py != expected_py
+          || std::fabs(xbase - expected_xbase) > 0.5f
+          || std::fabs(zbase - expected_zbase) > 0.5f)
+      {
+        LogDebug << "Chunk " << px << "_" << py << " of tile " << maintile->index.x << "_"
+                 << maintile->index.z << " had invalid stored coordinates ("
+                 << xbase << ", " << zbase << "), expected (" << expected_xbase
+                 << ", " << expected_zbase << "). Fixing them." << std::endl;
+
+        px = expected_px;
+        py = expected_py;
+        xbase = expected_xbase;
+        zbase = expected_zbase;
+      }
+    }
 
   }
 
@@ -860,7 +887,8 @@ void MapChunk::updateNormalsData()
   //gl.texSubImage2D(GL_TEXTURE_2D, 0, 0, px * 16 + py, mapbufsize, 1, GL_RGB, GL_FLOAT, mNormals);
 }
 
-bool MapChunk::changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius)
+bool MapChunk::changeTerrain(glm::vec3 const& pos, float change, float radius, int BrushType, float inner_radius
+                           , float min_height, float max_height)
 {
   //float dist, xdiff, zdiff;
   bool changed = false;
@@ -872,6 +900,17 @@ bool MapChunk::changeTerrain(glm::vec3 const& pos, float change, float radius, i
     {
       changed = true;
       mVertices[i].y += dt;
+
+      // Min/Max blending (issue #30): raising blends the terrain towards
+      // the max height, lowering blends it towards the min height
+      if (change > 0.f)
+      {
+        mVertices[i].y = std::min(mVertices[i].y, max_height);
+      }
+      else if (change < 0.f)
+      {
+        mVertices[i].y = std::max(mVertices[i].y, min_height);
+      }
     }
   }
   if (changed)
@@ -951,23 +990,30 @@ bool MapChunk::stampMCCV(glm::vec3 const& pos, glm::vec4 const& color, float cha
 
     if (use_image_colors)
     {
-      QColor image_color;
       if (pixel_x >= 0 && pixel_x < img->width() && pixel_y >= 0 && pixel_y < img->height())
       {
-        image_color = img->pixelColor(pixel_x, pixel_y);
-      }
-      else
-      {
-        image_color = QColor(Qt::black);
-      }
+        QColor const image_color = img->pixelColor(pixel_x, pixel_y);
+        float const alpha = image_color.alphaF();
 
-      mccv[i].x = image_color.redF() / 0.5f;
-      mccv[i].y = image_color.greenF() / 0.5f;
-      mccv[i].z = image_color.blueF() / 0.5f;
+        // Fix for issue #29: transparent mask pixels used to be read as
+        // opaque black (#000000), overwriting the vertex paint data near
+        // the cursor. Blend with the existing color by the pixel alpha so
+        // transparent mask areas leave the vertex color untouched.
+        if (alpha > 0.0f)
+        {
+          glm::vec3 const image_rgb
+          {
+            std::min(std::max(image_color.redF() / 0.5f, 0.0f), 2.0f),
+            std::min(std::max(image_color.greenF() / 0.5f, 0.0f), 2.0f),
+            std::min(std::max(image_color.blueF() / 0.5f, 0.0f), 2.0f)
+          };
 
-      mccv[i].x = std::min(std::max(mccv[i].x, 0.0f), 2.0f);
-      mccv[i].y = std::min(std::max(mccv[i].y, 0.0f), 2.0f);
-      mccv[i].z = std::min(std::max(mccv[i].z, 0.0f), 2.0f);
+          mccv[i].x += (image_rgb.x - mccv[i].x) * alpha;
+          mccv[i].y += (image_rgb.y - mccv[i].y) * alpha;
+          mccv[i].z += (image_rgb.z - mccv[i].z) * alpha;
+        }
+      }
+      // out of bounds mask pixels: leave the vertex color untouched
     }
     else
     {
@@ -975,7 +1021,11 @@ bool MapChunk::stampMCCV(glm::vec3 const& pos, glm::vec4 const& color, float cha
       if (pixel_x >= 0 && pixel_x < img->width() && pixel_y >= 0 && pixel_y < img->height())
       {
         auto mask_color = img->pixelColor(pixel_x, pixel_y);
-        image_factor = (mask_color.redF() + mask_color.greenF() + mask_color.blueF()) / 3.0f;
+        // Fix for issues #10/#29: take the mask alpha into account so
+        // fully transparent areas of the mask don't apply the brush and
+        // feathered edges scale the effect smoothly
+        image_factor = (mask_color.redF() + mask_color.greenF() + mask_color.blueF()) / 3.0f
+            * mask_color.alphaF();
       }
       else
       {
@@ -1250,7 +1300,8 @@ bool MapChunk::changeTerrainProcessVertex(glm::vec3 const& pos, glm::vec3 const&
 }
 
 auto MapChunk::stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiusOuter
-, float radiusInner, int brushType, bool sculpt) -> void
+, float radiusInner, int brushType, bool sculpt
+, float min_height, float max_height) -> void
 {
   if (sculpt)
   {
@@ -1280,6 +1331,16 @@ auto MapChunk::stamp(glm::vec3 const& pos, float dt, QImage const* img, float ra
       }
 
       mVertices[i].y += delta * image_factor;
+
+      // Min/Max blending (issue #30)
+      if (dt > 0.f)
+      {
+        mVertices[i].y = std::min(mVertices[i].y, max_height);
+      }
+      else if (dt < 0.f)
+      {
+        mVertices[i].y = std::max(mVertices[i].y, min_height);
+      }
     }
   }
   else
@@ -1318,6 +1379,16 @@ auto MapChunk::stamp(glm::vec3 const& pos, float dt, QImage const* img, float ra
       }
 
       mVertices[i].y = original_heightmap[i * 3 + 1] + (delta * image_factor);
+
+      // Min/Max blending (issue #30)
+      if (dt > 0.f)
+      {
+        mVertices[i].y = std::min(mVertices[i].y, max_height);
+      }
+      else if (dt < 0.f)
+      {
+        mVertices[i].y = std::max(mVertices[i].y, min_height);
+      }
     }
   }
 
