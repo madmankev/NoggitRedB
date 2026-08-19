@@ -70,6 +70,17 @@ namespace Noggit::Rendering
   };
 
 
+  // Fix for issue #61 (lighthouse light beams "underwater"): alpha blended and/or
+  // non depth-writing M2 batches must be drawn after the ADT liquid, otherwise
+  // the liquid blends on top of them. Passes can therefore be filtered so the
+  // world renderer can draw them in a second, after-water, pass.
+  enum class ModelRenderFilter
+  {
+    all,
+    first_passes_only,    // skip the late blended / no depth write passes
+    late_passes_only      // only those, for the after-water pass
+  };
+
   struct ModelRenderPass : ModelTexUnit
   {
     ModelRenderPass() = delete;
@@ -78,6 +89,9 @@ namespace Noggit::Rendering
     float ordering_thingy = 0.f;
     uint16_t index_start = 0, index_count = 0, vertex_start = 0, vertex_end = 0;
     uint16_t blend_mode = 0;
+    // Fix for issue #61: whether this pass blends and/or doesn't write depth and
+    // thus has to be drawn after the ADT liquid.
+    bool is_late_blended_pass = false;
     texture_unit_lookup tu_lookups[2];
     uint16_t textures[2];
     uint16_t uv_animations[2];
@@ -113,6 +127,7 @@ namespace Noggit::Rendering
         , display_mode display
         , bool no_cull
         , bool animate
+        , ModelRenderFilter render_filter = ModelRenderFilter::all
     );
 
     void draw (glm::mat4x4 const& model_view
@@ -130,7 +145,13 @@ namespace Noggit::Rendering
         , bool animate
         , bool draw_fake_geometry_box
         , bool draw_animation_box
+        , ModelRenderFilter render_filter = ModelRenderFilter::all
     );
+
+    // Fix for issue #61: true when the model has any blended / no depth write batch
+    // that needs the after-water drawing pass.
+    [[nodiscard]]
+    bool hasLateBlendedPasses() const { return _has_late_blended_passes; }
 
     void drawParticles(glm::mat4x4 const& model_view
         , OpenGL::Scoped::use_program& particles_shader
@@ -179,6 +200,10 @@ namespace Noggit::Rendering
     GLuint _bone_matrices_buf_tex;
     std::array<glm::vec3, 8> _vertex_box_points;
     std::vector<ModelRenderPass> _render_passes;
+
+    // Fix for issue #61: true when any render pass is a late blended / no depth write
+    // pass, used to skip models entirely during the after-water drawing pass.
+    bool _has_late_blended_passes = false;
 
     bool _uploaded = false;
     bool _vao_setup = false;

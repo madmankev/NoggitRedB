@@ -10,6 +10,8 @@
 #include <math/bounding_box.hpp>
 #include <math/frustum.hpp>
 
+#include <algorithm>
+
 #include <opengl/shader.hpp>
 
 #include <external/tracy/Tracy.hpp>
@@ -101,6 +103,7 @@ void ModelRender::draw(glm::mat4x4 const& model_view
     , display_mode display
     , bool no_cull
     , bool animate
+    , ModelRenderFilter render_filter
 )
 {
   if (!_model->finishedLoading() || _model->loading_failed())
@@ -109,6 +112,13 @@ void ModelRender::draw(glm::mat4x4 const& model_view
   }
 
   if (!no_cull && !instance.isInFrustum(frustum) && !instance.isInRenderDist(cull_distance, camera, display))
+  {
+    return;
+  }
+
+  // Fix for issue #61: fast-out when the after-water pass is requested on a model
+  // without any blended batch.
+  if (render_filter == ModelRenderFilter::late_passes_only && !_has_late_blended_passes)
   {
     return;
   }
@@ -143,6 +153,13 @@ void ModelRender::draw(glm::mat4x4 const& model_view
 
   for (ModelRenderPass& p : _render_passes)
   {
+    // Fix for issue #61: optionally skip early or late blended batches.
+    if (render_filter != ModelRenderFilter::all
+        && (p.is_late_blended_pass != (render_filter == ModelRenderFilter::late_passes_only)))
+    {
+      continue;
+    }
+
     if (p.prepareDraw(m2_shader, _model, model_render_state))
     {
       gl.drawElements(GL_TRIANGLES, p.index_count, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(p.index_start * sizeof(GLushort)));
@@ -170,9 +187,17 @@ void ModelRender::draw(glm::mat4x4 const& model_view
     , bool animate
     , bool draw_fake_geometry_box
     , bool draw_animation_box
+    , ModelRenderFilter render_filter
 )
 {
   ZoneScopedN(NOGGIT_CURRENT_FUNCTION);
+
+  // Fix for issue #61: fast-out before touching any buffer when the after-water
+  // pass is requested on a model without any blended batch.
+  if (render_filter == ModelRenderFilter::late_passes_only && !_has_late_blended_passes)
+  {
+    return;
+  }
 
   {
     ZoneScopedN("Model::draw() : uploads")
@@ -252,6 +277,13 @@ void ModelRender::draw(glm::mat4x4 const& model_view
 
     for (ModelRenderPass& p : _render_passes)
     {
+      // Fix for issue #61: optionally skip early or late blended batches.
+      if (render_filter != ModelRenderFilter::all
+          && (p.is_late_blended_pass != (render_filter == ModelRenderFilter::late_passes_only)))
+      {
+        continue;
+      }
+
       if (p.prepareDraw(m2_shader, _model, model_render_state))
       {
         gl.drawElementsInstanced(GL_TRIANGLES, p.index_count, GL_UNSIGNED_SHORT, reinterpret_cast<void*>(p.index_start * sizeof(GLushort)), static_cast<GLsizei>(instances.size()));
@@ -806,6 +838,10 @@ void ModelRender::initRenderPasses(ModelView const* view, ModelTexUnit const* te
 
   // transparent parts come later
   std::sort(_render_passes.begin(), _render_passes.end());
+
+  // Fix for issue #61: track whether any pass needs the after-water drawing pass.
+  _has_late_blended_passes = std::any_of(_render_passes.begin(), _render_passes.end(),
+    [](ModelRenderPass const& pass) { return pass.is_late_blended_pass; });
 }
 
 void ModelRender::updateBoneMatrices()
@@ -826,6 +862,14 @@ ModelRenderPass::ModelRenderPass(ModelTexUnit const& tex_unit, Model* m)
     , blend_mode(m->_render_flags.empty() ? 0
         : m->_render_flags[std::min<size_t>(renderflag_index, m->_render_flags.size() - 1)].blend)
 {
+  // Fix for issue #61: batches that alpha blend (blend modes 2+) and/or don't write
+  // to the depth buffer ("Not Z-buffered" flag) must be drawn after the ADT liquid,
+  // see the filtered passes in ModelRender::draw.
+  if (!m->_render_flags.empty())
+  {
+    auto const& render_flags = m->_render_flags[std::min<size_t>(renderflag_index, m->_render_flags.size() - 1)];
+    is_late_blended_pass = render_flags.blend >= 2 || render_flags.flags.z_buffered;
+  }
 }
 
 bool ModelRenderPass::prepareDraw(OpenGL::Scoped::use_program& m2_shader, Model *m, OpenGL::M2RenderState& model_render_state)

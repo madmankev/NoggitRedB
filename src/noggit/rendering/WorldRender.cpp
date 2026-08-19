@@ -998,6 +998,9 @@ void WorldRender::draw (glm::mat4x4 const& model_view
 
           /*if (draw_hidden_models || !pair.first->is_hidden())*/ // now done when building models_to_draw
           {
+            // Fix for issue #61: blended / non depth-writing M2 batches are skipped
+            // here and drawn after the liquid pass below, otherwise e.g. lighthouse
+            // light beams end up looking like they are under the water surface.
             pair.first->renderer()->draw( model_view
                 , pair.second
                 , m2_shader
@@ -1013,6 +1016,7 @@ void WorldRender::draw (glm::mat4x4 const& model_view
                 , render_settings.draw_model_animations
                 , render_settings.editing_mode == editing_mode::object
                 , draw_animated_boxes
+                , Noggit::Rendering::ModelRenderFilter::first_passes_only
             );
             _world->_n_rendered_objects += pair.second.size();
           }
@@ -1086,7 +1090,8 @@ void WorldRender::draw (glm::mat4x4 const& model_view
     // unsigned int models_todraw_count = models_to_draw.size();
     _world->_n_rendered_objects += wmos_to_draw.size();
 
-    models_to_draw.clear();
+    // Fix for issue #61: keep models_to_draw around, the blended batches of those
+    // models are drawn in a second pass once the liquid has been drawn.
     wmos_to_draw.clear();
 
     // draw model boxes with m2 box shader
@@ -1312,6 +1317,70 @@ void WorldRender::draw (glm::mat4x4 const& model_view
     }
 
     gl.bindVertexArray(0);
+  }
+
+  // Fix for issue #61: draw the alpha blending / non depth-writing M2 batches now
+  // that the liquid is in the framebuffer, models like the lighthouse light beams
+  // would otherwise end up looking like they are under the water.
+  if (render_settings.draw_models || draw_doodads_wmo || (render_settings.minimap_render && minimap_render_settings->use_filters))
+  {
+    ZoneScopedN("World::draw() : Draw M2s blended batches (above water)");
+
+    bool has_late_blended_models = false;
+
+    for (auto const& pair : models_to_draw)
+    {
+      if (pair.first->renderer()->hasLateBlendedPasses())
+      {
+        has_late_blended_models = true;
+        break;
+      }
+    }
+
+    if (has_late_blended_models)
+    {
+      OpenGL::Scoped::use_program m2_shader {*_m2_instanced_program.get()};
+
+      OpenGL::M2RenderState model_render_state;
+      model_render_state.tex_arrays = {0, 0};
+      model_render_state.tex_indices = {0, 0};
+      model_render_state.tex_unit_lookups = {0, 0};
+      gl.blendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+      gl.disable(GL_BLEND);
+      gl.depthMask(GL_TRUE);
+      gl.enable(GL_CULL_FACE);
+      m2_shader.uniform("blend_mode", 0);
+      m2_shader.uniform("unfogged", static_cast<int>(model_render_state.unfogged));
+      m2_shader.uniform("unlit",  static_cast<int>(model_render_state.unlit));
+      m2_shader.uniform("tex_unit_lookup_1", 0);
+      m2_shader.uniform("tex_unit_lookup_2", 0);
+      m2_shader.uniform("pixel_shader", 0);
+
+      for (auto const& pair : models_to_draw)
+      {
+        pair.first->renderer()->draw( model_view
+            , pair.second
+            , m2_shader
+            , model_render_state
+            , frustum
+            , _cull_distance
+            , camera_pos
+            , _world->animtime
+            , false
+            , model_boxes_to_draw
+            , render_settings.display_mode
+            , false
+            , render_settings.draw_model_animations
+            , false
+            , false
+            , Noggit::Rendering::ModelRenderFilter::late_passes_only
+        );
+      }
+
+      gl.disable(GL_BLEND);
+      gl.enable(GL_CULL_FACE);
+      gl.depthMask(GL_TRUE);
+    }
   }
 
   gl.enable(GL_BLEND);

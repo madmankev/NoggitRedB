@@ -42,7 +42,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 56 | Update Key Bindings help | fixed (63803f8) |
 | 57 | md5translate.trs wrong formatting for X < 10 | already fixed in baseline |
 | 60 | Rotation gizmo pivot inaccuracy | already fixed in baseline |
-| 61 | Missing rendering features | |
+| 61 | Missing rendering features | fixed: blended-batch sort vs water (beams). Skybox, flight bounds, tex transforms, unlit already implemented. Remaining wishlist: particles/ribbons, WMO liquid |
 | 62 | Minimap generation: missing liquid lighting | fixed |
 | 63 | Shader hot reloading | fixed (3d4f4dd) |
 | 64 | Can't remove sound entry files rows | already fixed in baseline |
