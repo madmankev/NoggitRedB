@@ -377,6 +377,23 @@ public:
     static const size_t ObjectEffectPackageID = 18;        // int
 };
 
+// Issue #52 (graveyards editor): WorldSafeLocs.dbc
+class WorldSafeLocsDB : public DBCFile
+{
+public:
+    WorldSafeLocsDB() :
+        DBCFile("DBFilesClient\\WorldSafeLocs.dbc")
+    { }
+
+    /// Fields
+    static const size_t ID = 0;      // uint
+    static const size_t Continent = 1;  // uint [Map]
+    static const size_t LocX = 2;    // float
+    static const size_t LocY = 3;    // float
+    static const size_t LocZ = 4;    // float
+    static const size_t Comment = 5;  // string (unused by the client)
+};
+
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData);
 
 const char * getGroundEffectDoodad(unsigned int effectID, int DoodadNum);
@@ -392,6 +409,7 @@ extern LightIntBandDB gLightIntBandDB;
 extern LightFloatBandDB gLightFloatBandDB;
 extern GroundEffectDoodadDB gGroundEffectDoodadDB;
 extern GroundEffectTextureDB gGroundEffectTextureDB;
+extern WorldSafeLocsDB gWorldSafeLocsDB;
 extern TerrainTypeDB gTerrainTypeDB;
 extern LiquidTypeDB gLiquidTypeDB;
 extern SoundProviderPreferencesDB gSoundProviderPreferencesDB;

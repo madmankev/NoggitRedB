@@ -251,7 +251,11 @@ void DBCFile::removeRecord(size_t id, size_t id_field)
 
       size_t row_position = row_counter * recordSize; // position of the record to remove
 
-      size_t datasizeafterRow = recordSize * (recordCount - row_counter); // size of the data after the row that needs to be moved at the old row's position
+      // Fix(issue #52 follow-up): this used to be one record too large
+      // (recordCount - row_counter), making the memmove below read one
+      // record past the end of the record data. Only the records *after*
+      // the removed one have to be moved.
+      size_t datasizeafterRow = recordSize * (recordCount - row_counter - 1); // size of the data after the row that needs to be moved at the old row's position
 
       // assert(initial_size >= (datasizeafterRow + row_position));
       if ((row_position + datasizeafterRow) > initial_size)

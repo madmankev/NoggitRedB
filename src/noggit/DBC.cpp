@@ -26,6 +26,7 @@ ZoneMusicDB gZoneMusicDB;
 ZoneIntroMusicTableDB gZoneIntroMusicTableDB;
 SoundEntriesDB gSoundEntriesDB;
 WMOAreaTableDB gWMOAreaTableDB;
+WorldSafeLocsDB gWorldSafeLocsDB;
 
 void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
 {
@@ -52,6 +53,7 @@ void OpenDBs(std::shared_ptr<BlizzardArchive::ClientData> clientData)
     gZoneIntroMusicTableDB.open(clientData);
     gSoundEntriesDB.open(clientData);
     gWMOAreaTableDB.open(clientData);
+    gWorldSafeLocsDB.open(clientData);
   }
   catch (BlizzardArchive::Exceptions::FileReadFailedError const& e)
   {
