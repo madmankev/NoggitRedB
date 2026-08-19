@@ -35,6 +35,8 @@
 #include <noggit/ui/hole_tool.hpp>
 #include <noggit/ui/texture_palette_small.hpp>
 #include <noggit/ui/MinimapCreator.hpp>
+#include <noggit/ui/widgets/LogConsoleWidget.hpp>
+#include <noggit/ui/widgets/SafeLocsEditor.hpp>
 #include <noggit/project/CurrentProject.hpp>
 #include <opengl/scoped.hpp>
 #include <noggit/ui/tools/ViewToolbar/Ui/ViewToolbar.hpp>
@@ -671,6 +673,58 @@ void MapView::setupDetailInfos()
     {
       updateDetailInfos();
     });
+}
+
+// Fix for issue #50: log console panel
+void MapView::setupLogConsole()
+{
+  _log_console = new Noggit::Ui::LogConsoleWidget(this);
+
+  _log_console_dock = new QDockWidget("Log console", this);
+  _log_console_dock->setFeatures(QDockWidget::DockWidgetMovable
+                                 | QDockWidget::DockWidgetFloatable
+                                 | QDockWidget::DockWidgetClosable);
+  _log_console_dock->setAllowedAreas(Qt::BottomDockWidgetArea
+                                     | Qt::TopDockWidgetArea
+                                     | Qt::LeftDockWidgetArea
+                                     | Qt::RightDockWidgetArea);
+  _log_console_dock->setWidget(_log_console);
+
+  connect(this, &QObject::destroyed, _log_console_dock, &QObject::deleteLater);
+
+  _main_window->addDockWidget(Qt::BottomDockWidgetArea, _log_console_dock);
+
+  _show_log_console.set(_settings->value("map_view/log_console", false).toBool());
+
+  connect ( &_show_log_console, &Noggit::BoolToggleProperty::changed
+    , [this]
+          {
+            if (!ui_hidden)
+            {
+              _log_console_dock->setVisible(_show_log_console.get());
+            }
+          }
+  );
+
+  connect ( _log_console_dock, &QDockWidget::visibilityChanged
+    , [this](bool visible)
+          {
+            _show_log_console.set(visible);
+            _settings->setValue("map_view/log_console", visible);
+          }
+  );
+
+  // an editor error is important enough to be seen: open the panel the
+  // first time one is logged (the user can still dismiss it afterwards)
+  _log_console->on_error = [this]()
+  {
+    _log_console->on_error = nullptr;
+
+    if (!_show_log_console.get())
+    {
+      _show_log_console.set(true);
+    }
+  };
 }
 
 void MapView::updateDetailInfos()
@@ -2037,6 +2091,8 @@ void MapView::setupViewMenu()
   ADD_ACTION(view_menu, "Toggle UI", Qt::Key_Tab, hide_widgets);
 
   ADD_TOGGLE (view_menu, "Detail infos", Qt::Key_F8, _show_detail_info_window);
+  // Fix for issue #50: log console panel
+  ADD_TOGGLE_NS (view_menu, "Log console", _show_log_console);
 
   addHotkey( Qt::Key_H
     , MOD_none
@@ -2126,6 +2182,16 @@ void MapView::setupToolsMenu()
     {
         tool->registerMenuItems(menu);
     }
+
+    // Fix for issue #52: graveyard editor
+    auto safe_locs_editor_action(menu->addAction("Graveyard editor (WorldSafeLocs.dbc)"));
+    connect(safe_locs_editor_action, &QAction::triggered, [this, menu]
+            {
+              auto safe_locs_editor = new Noggit::Ui::SafeLocsEditor(this);
+              safe_locs_editor->setAttribute(Qt::WA_DeleteOnClose);
+              connect(menu, &QObject::destroyed, safe_locs_editor, &QObject::deleteLater);
+              safe_locs_editor->show();
+            });
 }
 
 void MapView::setupHelpMenu()
@@ -2505,6 +2571,7 @@ void MapView::createGUI()
   // texturingTool->setup_ge_tool_renderer();
   setupNodeEditor();
   setupDetailInfos();
+  setupLogConsole();
   setupToolbars();
   setupKeybindingsGui();
 

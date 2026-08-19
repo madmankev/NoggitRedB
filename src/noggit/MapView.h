@@ -66,6 +66,8 @@ namespace Noggit
     class help;
     class minimap_widget;
     class toolbar;
+    // Fix for issue #50: log console panel
+    class LogConsoleWidget;
   }
 }
 
@@ -150,6 +152,8 @@ public:
   Noggit::BoolToggleProperty _draw_lights_zones = { false };
   Noggit::BoolToggleProperty _show_detail_info_window = { false };
   Noggit::BoolToggleProperty _show_minimap_window = { false };
+  // Fix for issue #50: log console panel
+  Noggit::BoolToggleProperty _show_log_console = { false };
 private:
 
   void update_cursor_pos();
@@ -366,6 +370,10 @@ private:
   Noggit::Ui::minimap_widget* _minimap;
   QDockWidget* _minimap_dock;
 
+  // Fix for issue #50: log console panel
+  Noggit::Ui::LogConsoleWidget* _log_console = nullptr;
+  QDockWidget* _log_console_dock = nullptr;
+
   void setToolPropertyWidgetVisibility(editing_mode mode);
 
   void unloadOpenglData() override;
@@ -411,6 +419,8 @@ private:
   void setupNodeEditor();
   void setupAssetBrowser();
   void setupDetailInfos();
+  // Fix for issue #50: log console panel
+  void setupLogConsole();
   void updateDetailInfos();
   void setupToolbars();
   void setupKeybindingsGui();
