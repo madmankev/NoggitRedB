@@ -9,6 +9,7 @@
 #include <noggit/Action.hpp>
 
 class MapView;
+class MapTile;
 
 
 namespace Noggit
@@ -44,6 +45,12 @@ namespace Noggit
 
         void purge();
 
+        // Fix for issue #1: history actions hold raw MapChunk/vertex
+        // pointers. When a tile is unloaded or reloaded those pointers
+        // dangle and undoing corrupts memory/the undo stack. Drop every
+        // action referencing the tile before it is destroyed.
+        void dropActionsForTile(MapTile const* tile);
+
         [[nodiscard]]
         unsigned limit() const;
 
@@ -57,6 +64,10 @@ namespace Noggit
       void popFront();
       void addedAction(Action* action);
       void purged();
+      // emitted when arbitrary actions were removed from the middle of the
+      // stack (e.g. because the tile they referenced was unloaded). Views
+      // tracking the stack should rebuild themselves completely.
+      void actionsInvalidated();
       void currentActionChanged(unsigned index);
       void onActionBegin(Action* action);
       void onActionEnd(Action* action);

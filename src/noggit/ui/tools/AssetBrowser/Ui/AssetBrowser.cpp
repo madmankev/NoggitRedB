@@ -21,6 +21,7 @@
 #include <QIcon>
 #include <QItemSelectionModel>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QPixmap>
 #include <QSettings>
 #include <QSlider>
@@ -31,6 +32,33 @@
 
 using namespace Noggit::Ui::Tools::AssetBrowser::Ui;
 using namespace Noggit::Ui;
+
+QMimeData* NoggitAssetBrowserItemModel::mimeData(const QModelIndexList& indexes) const
+{
+  // Fix for issue #3: the object palette expects the dragged text to be the
+  // full lowercase file path of the asset (stored in Qt::UserRole by the
+  // TreeManager), not the short display label. Keep the default model mime
+  // types and override the text so drops produce working palette entries.
+  QMimeData* data = QStandardItemModel::mimeData(indexes);
+
+  for (QModelIndex const& index : indexes)
+  {
+    if (!index.isValid())
+    {
+      continue;
+    }
+
+    QString const path = index.data(Qt::UserRole).toString();
+
+    if (!path.isEmpty())
+    {
+      data->setText(path);
+      break;
+    }
+  }
+
+  return data;
+}
 
 AssetBrowserWidget::AssetBrowserWidget(MapView* map_view, QWidget *parent)
 : QMainWindow(parent, Qt::Window)
@@ -76,7 +104,7 @@ AssetBrowserWidget::AssetBrowserWidget(MapView* map_view, QWidget *parent)
       }
   );
 
-  _model = new QStandardItemModel(this);
+  _model = new NoggitAssetBrowserItemModel(this);
   // _sort_model = new QSortFilterProxyModel(this);
   _sort_model = new NoggitExpendableFilterProxyModel;
   _sort_model->setFilterCaseSensitivity(Qt::CaseInsensitive);

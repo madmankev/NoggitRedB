@@ -1351,17 +1351,27 @@ auto MapChunk::stamp(glm::vec3 const& pos, float dt, QImage const* img, float ra
     if (!original_heightmap)
       return;
 
+    // Fix for issue #26: the stamp used to recompute every vertex from the
+    // action-start snapshot on each event (y = original + accumulated * f).
+    // That re-basing discarded the edits of any other terrain tool stacked
+    // after it (e.g. blur in a custom stamp), and the two tools kept
+    // overwriting each other every frame, making the terrain flicker.
+    //
+    // Every brush falloff applied by changeTerrainProcessVertex() is a
+    // multiplicative factor of dt, so applying the per-event delta to the
+    // current height is mathematically identical to re-basing from the
+    // snapshot as long as the stamp is the only tool editing the terrain,
+    // and it composes correctly when other tools run in the same pass.
     for(int i{}; i < mapbufsize; ++i)
     {
       if(std::abs(pos.x - mVertices[i].x) > radiusOuter || std::abs(pos.z - mVertices[i].z) > radiusOuter)
         continue;
 
-      float delta = cur_action->getDelta();
+      float delta = dt;
 
       changeTerrainProcessVertex(pos, mVertices[i], delta, radiusOuter, radiusInner, brushType);
 
-      glm::vec3 const diff{glm::vec3{original_heightmap[i * 3], original_heightmap[i * 3 + 1], original_heightmap[i * 3 + 2]} - pos};
-
+      glm::vec3 const diff{mVertices[i] - pos};
 
       int pixel_x = std::round(((diff.x + radiusOuter) / (2.f * radiusOuter)) * img->width());
       int pixel_y =  std::round(((diff.z + radiusOuter) / (2.f * radiusOuter)) * img->height());
@@ -1378,7 +1388,7 @@ auto MapChunk::stamp(glm::vec3 const& pos, float dt, QImage const* img, float ra
         image_factor = 0;
       }
 
-      mVertices[i].y = original_heightmap[i * 3 + 1] + (delta * image_factor);
+      mVertices[i].y += delta * image_factor;
 
       // Min/Max blending (issue #30)
       if (dt > 0.f)

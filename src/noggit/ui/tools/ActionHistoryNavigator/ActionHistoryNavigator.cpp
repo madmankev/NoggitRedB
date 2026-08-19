@@ -43,6 +43,7 @@ ActionHistoryNavigator::ActionHistoryNavigator(QWidget* parent)
   connect(action_mgr, &Noggit::ActionManager::addedAction, this, &ActionHistoryNavigator::pushAction);
   connect(action_mgr, &Noggit::ActionManager::purged, this, &ActionHistoryNavigator::purge);
   connect(action_mgr, &Noggit::ActionManager::currentActionChanged, this, &ActionHistoryNavigator::changeCurrentAction);
+  connect(action_mgr, &Noggit::ActionManager::actionsInvalidated, this, &ActionHistoryNavigator::rebuild);
 
   connect(_active_action_button_group, &QButtonGroup::idClicked
           , [=](int index)
@@ -178,6 +179,19 @@ void ActionHistoryNavigator::purge()
     delete radio;
   }
   _action_stack->clear();
+
+  updateStackSizeLabel();
+}
+
+void ActionHistoryNavigator::rebuild()
+{
+  purge();
+
+  // Re-add every action still alive in the manager, in order.
+  for (Noggit::Action* action : *NOGGIT_ACTION_MGR->getActionStack())
+  {
+    pushAction(action);
+  }
 
   updateStackSizeLabel();
 }

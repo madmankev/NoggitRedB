@@ -48,13 +48,75 @@ unsigned ActionManager::limit() const
 
 void ActionManager::purge()
 {
+  // Fix for issue #1: purging used to delete the currently running action
+  // too, leaving _cur_action dangling. The next endAction()/register call
+  // then operated on freed memory and corrupted the undo stack.
   for (auto& action : _action_stack)
   {
-    delete action;
+    if (action != _cur_action)
+    {
+      delete action;
+    }
   }
+
   _action_stack.clear();
+
+  if (_cur_action)
+  {
+    _action_stack.push_back(_cur_action);
+  }
+
   _undo_index = 0;
   emit purged();
+}
+
+void ActionManager::dropActionsForTile(MapTile const* tile)
+{
+  if (!tile || _action_stack.empty())
+  {
+    return;
+  }
+
+  // The undone actions sit at the back of the stack, remember how many of
+  // them get erased so _undo_index stays consistent.
+  std::size_t const total = _action_stack.size();
+  std::size_t const first_undone = total - std::min<std::size_t>(_undo_index, total);
+
+  std::size_t index = 0;
+  std::size_t undone_erased = 0;
+  bool erased = false;
+
+  for (auto it = _action_stack.begin(); it != _action_stack.end();)
+  {
+    // Never delete the currently running action from under the tool that is
+    // using it, its chunk pointers are about to be invalidated either way
+    // once the tile is gone, but deleting it here would crash the editor
+    // immediately instead of on the next undo.
+    if (*it != _cur_action && (*it)->referencesTile(tile))
+    {
+      if (index >= first_undone)
+      {
+        ++undone_erased;
+      }
+
+      delete *it;
+      it = _action_stack.erase(it);
+      erased = true;
+    }
+    else
+    {
+      ++it;
+    }
+
+    ++index;
+  }
+
+  if (erased)
+  {
+    _undo_index -= static_cast<unsigned>(undone_erased);
+    emit actionsInvalidated();
+    emit currentActionChanged(_undo_index);
+  }
 }
 
 Action* ActionManager::beginAction(MapView* map_view
@@ -109,13 +171,18 @@ void ActionManager::endAction()
   if (!(_cur_action->getFlags() & eDO_NOT_WRITE_HISTORY))
   {
     emit addedAction(_cur_action);
+    emit onActionEnd(_cur_action);
   }
   else
   {
+    // non-history actions are removed from the stack, delete them as well
+    // instead of leaking them (and emitting with a dangling pointer).
+    Action* action = _cur_action;
+    emit onActionEnd(action);
     _action_stack.pop_back();
+    delete action;
   }
 
-  emit onActionEnd(_cur_action);
   _cur_action = nullptr;
   emit currentActionChanged(_undo_index);
 }
@@ -131,13 +198,16 @@ void ActionManager::endActionOnModalityMismatch(unsigned modality_controls)
   if ((modality_controls & _cur_action->getModalityControllers()) != _cur_action->getModalityControllers())
   {
     _cur_action->finish();
+    emit onActionEnd(_cur_action);
     if (!(_cur_action->getFlags() & eDO_NOT_WRITE_HISTORY))
     {
       emit addedAction(_cur_action);
     }
     else
     {
+      // see endAction(): popped non-history actions must be deleted too.
       _action_stack.pop_back();
+      delete _cur_action;
     }
     _cur_action = nullptr;
     emit currentActionChanged(_undo_index);

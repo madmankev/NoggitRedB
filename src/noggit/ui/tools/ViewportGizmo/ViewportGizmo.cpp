@@ -219,7 +219,16 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
         }
         case ImGuizmo::SCALE:
         {
-          scale = std::max(0.001f, scale * (new_scale.x / _last_pivot_scale));
+          float const scale_factor = new_scale.x / _last_pivot_scale;
+          scale = std::max(0.001f, scale * scale_factor);
+
+          // Fix for issue #17: scaling a multi-selection used to only grow
+          // each object in place. Also scale the object positions relative
+          // to the selection center so the group expands/contracts as a whole.
+          if (_use_multiselection_pivot)
+          {
+            pos = _multiselection_pivot + (pos - _multiselection_pivot) * scale_factor;
+          }
           break;
         }
         case ImGuizmo::BOUNDS:
@@ -233,6 +242,12 @@ void ViewportGizmo::handleTransformGizmo(MapView* map_view
       if (_world)
         _world->updateTilesEntry(selected, model_update::add);
     }
+
+    // Fix for issue #17: the selection pivot used to only be recomputed when
+    // the selection changed, so after dragging or scaling a multi-selection
+    // the gizmo stayed at the old center instead of following the objects.
+    if (_world)
+      _world->update_selection_pivot();
   }
   else
   {

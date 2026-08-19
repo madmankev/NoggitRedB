@@ -112,6 +112,10 @@
 #include <QFileDialog>
 #include <QProgressDialog>
 #include <QClipboard>
+#include <QDragEnterEvent>
+#include <QDragMoveEvent>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QOpenGLContext>
 #include <QProcess>
 #include <QWidgetAction>
@@ -2591,6 +2595,9 @@ MapView::MapView( math::degrees camera_yaw0
   setMaximumHeight(10000);
   setAttribute(Qt::WA_OpaquePaintEvent, true);
   setUpdateBehavior(QOpenGLWidget::NoPartialUpdate);
+  // Fix for issue #3: accept asset drops (e.g. dragged from the asset
+  // browser) to spawn models directly on the map.
+  setAcceptDrops(true);
 
   _world->LoadSavedSelectionGroups(); // not doing this in world constructor because noggit loads world twice
 
@@ -3008,6 +3015,15 @@ MapView::~MapView()
     && QOpenGLContext::currentContext() == context();
 
   _destroying = true;
+
+  // Fix for issue #1: clear the undo/redo history before the world (and its
+  // tiles/chunks) is destroyed. History actions hold raw pointers into them,
+  // so undoing after leaving a map used to corrupt memory.
+  if (NOGGIT_CUR_ACTION)
+  {
+    NOGGIT_ACTION_MGR->endAction();
+  }
+  NOGGIT_ACTION_MGR->purge();
 
   _main_window->removeToolBar(_main_window->_app_toolbar);
 
@@ -4415,6 +4431,91 @@ glm::vec3 MapView::cursorPosition() const
 void MapView::cursorPosition(glm::vec3 position)
 {
     _cursor_pos = position;
+}
+
+// Fix for issue #3: also support spawning a model by dragging an asset from
+// the asset browser (or palette) directly onto the 3D viewport.
+void MapView::dragEnterEvent(QDragEnterEvent* event)
+{
+  if (!event->mimeData()->hasText())
+  {
+    return QWidget::dragEnterEvent(event);
+  }
+
+  QString const path = event->mimeData()->text().toLower();
+
+  if (path.endsWith(".m2") || path.endsWith(".wmo") || path.endsWith(".mdx"))
+  {
+    event->acceptProposedAction();
+  }
+  else
+  {
+    QWidget::dragEnterEvent(event);
+  }
+}
+
+void MapView::dragMoveEvent(QDragMoveEvent* event)
+{
+  if (event->mimeData()->hasText())
+  {
+    QString const path = event->mimeData()->text().toLower();
+
+    if (path.endsWith(".m2") || path.endsWith(".wmo") || path.endsWith(".mdx"))
+    {
+      // keep the cursor position updated so the object spawns where it's dropped
+      _last_mouse_pos = event->pos();
+      update_cursor_pos();
+      event->acceptProposedAction();
+      return;
+    }
+  }
+
+  QWidget::dragMoveEvent(event);
+}
+
+void MapView::dropEvent(QDropEvent* event)
+{
+  if (!event->mimeData()->hasText())
+  {
+    return QWidget::dropEvent(event);
+  }
+
+  QString path = event->mimeData()->text();
+
+  if (!(path.endsWith(".m2") || path.endsWith(".wmo") || path.endsWith(".mdx")))
+  {
+    return QWidget::dropEvent(event);
+  }
+
+  setFocus(Qt::MouseFocusReason);
+
+  _last_mouse_pos = event->pos();
+  update_cursor_pos();
+
+  std::string const filepath = path.toLower().toStdString();
+
+  try
+  {
+    NOGGIT_ACTION_MGR->beginAction(this, Noggit::ActionFlags::eOBJECTS_ADDED);
+
+    if (filepath.ends_with(".wmo"))
+    {
+      _world->addWMO(filepath, _cursor_pos, 1.f, math::degrees::vec3(glm::vec3(0.f)), nullptr, true);
+    }
+    else
+    {
+      _world->addM2(filepath, _cursor_pos, 1.f, math::degrees::vec3(glm::vec3(0.f)), nullptr, true);
+    }
+
+    NOGGIT_ACTION_MGR->endAction();
+  }
+  catch (...)
+  {
+    NOGGIT_ACTION_MGR->endAction();
+    LogError << "Failed to spawn dropped asset: " << filepath << std::endl;
+  }
+
+  event->acceptProposedAction();
 }
 
 void MapView::enableGizmoBar()

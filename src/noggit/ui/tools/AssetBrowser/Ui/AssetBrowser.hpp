@@ -6,6 +6,7 @@
 #include <QRegularExpression>
 #include <QMainWindow>
 #include <QMap>
+#include <QStandardItemModel>
 
 namespace Ui
 {
@@ -15,7 +16,18 @@ namespace Ui
 
 class MapView;
 
-class QStandardItemModel;
+// Fix for issue #3: the default drag mime data of a QTreeView only exposes
+// the item's display role (the file label) as text. The object palette (and
+// other drop targets) expect the full lowercase file path, which is stored in
+// Qt::UserRole. This model writes that path into the mime data instead.
+class NoggitAssetBrowserItemModel : public QStandardItemModel
+{
+    Q_OBJECT
+public:
+    using QStandardItemModel::QStandardItemModel;
+
+    QMimeData* mimeData(const QModelIndexList& indexes) const override;
+};
 
 // custom model that makes the searched children expend, credit to https://stackoverflow.com/questions/56781145/expand-specific-items-in-a-treeview-during-filtering
 class NoggitExpendableFilterProxyModel : public QSortFilterProxyModel
@@ -76,7 +88,7 @@ namespace Noggit
     private:
       ::Ui::AssetBrowser* ui;
       ::Ui::AssetBrowserOverlay* viewport_overlay_ui;
-      QStandardItemModel* _model;
+      NoggitAssetBrowserItemModel* _model;
       NoggitExpendableFilterProxyModel* _sort_model;
       PreviewRenderer* _preview_renderer;
       QRegularExpression _wmo_group_and_lod_regex;

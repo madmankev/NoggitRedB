@@ -587,6 +587,74 @@ void Noggit::Action::finish()
       _post();
 }
 
+bool Noggit::Action::referencesTile(MapTile const* tile) const
+{
+  if (!tile)
+  {
+    return false;
+  }
+
+  auto references = [tile](MapChunk const* chunk)
+  {
+    return chunk && chunk->mt == tile;
+  };
+
+  auto any_chunk = [&references](auto const& container)
+  {
+    for (auto const& pair : container)
+    {
+      if (references(pair.first))
+      {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  if (any_chunk(_chunk_terrain_pre) || any_chunk(_chunk_terrain_post)
+      || any_chunk(_chunk_texture_pre) || any_chunk(_chunk_texture_post)
+      || any_chunk(_chunk_vertex_color_pre) || any_chunk(_chunk_vertex_color_post)
+      || any_chunk(_chunk_holes_pre) || any_chunk(_chunk_holes_post)
+      || any_chunk(_chunk_area_id_pre) || any_chunk(_chunk_area_id_post)
+      || any_chunk(_chunk_layerinfos_pre) || any_chunk(_chunk_layerinfos_post)
+      || any_chunk(_chunk_detaildoodad_exclusion_pre) || any_chunk(_chunk_detaildoodad_exclusion_post)
+      || any_chunk(_chunk_flags_pre) || any_chunk(_chunk_flags_post)
+      || any_chunk(_chunk_liquid_pre) || any_chunk(_chunk_liquid_post)
+      || any_chunk(_chunk_shadow_map_pre) || any_chunk(_chunk_shadow_map_post))
+  {
+    return true;
+  }
+
+  auto vertex_selection_references = [&] (VertexSelectionCache const& cache)
+  {
+    if (cache.vertex_tiles.find(const_cast<MapTile*>(tile)) != cache.vertex_tiles.end())
+    {
+      return true;
+    }
+
+    for (MapChunk const* chunk : cache.vertex_chunks)
+    {
+      if (references(chunk))
+      {
+        return true;
+      }
+    }
+
+    for (MapChunk const* chunk : cache.vertex_border_chunks)
+    {
+      if (references(chunk))
+      {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  return vertex_selection_references(_vertex_selection_pre)
+      || vertex_selection_references(_vertex_selection_post);
+}
+
 float* Noggit::Action::getChunkTerrainOriginalData(MapChunk* chunk)
 {
   for (auto& pair : _chunk_terrain_pre)

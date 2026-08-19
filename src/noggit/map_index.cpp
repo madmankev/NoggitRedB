@@ -442,6 +442,9 @@ void MapIndex::reloadTile(const TileIndex& tile)
 {
   if (tileLoaded(tile))
   {
+    // Fix for issue #1: drop undo/redo history actions referencing this
+    // tile before destroying it, they hold raw chunk pointers.
+    NOGGIT_ACTION_MGR->dropActionsForTile(mTiles[tile.z][tile.x].tile.get());
     mTiles[tile.z][tile.x].tile.reset();
     loadTile(tile, true);
   }
@@ -485,6 +488,10 @@ void MapIndex::unloadTile(const TileIndex& tile)
     // otherwise it can be deleted before the log because it comes from the adt itself (see unloadTiles)
     Log << "Unloading Tile " << tile.x << "-" << tile.z << std::endl;
 
+    // Fix for issue #1: drop undo/redo history actions referencing this
+    // tile before destroying it, they hold raw chunk pointers and undoing
+    // them after the unload used to corrupt the undo stack / crash.
+    NOGGIT_ACTION_MGR->dropActionsForTile(mTiles[tile.z][tile.x].tile.get());
     AsyncLoader::instance->ensure_deletable(mTiles[tile.z][tile.x].tile.get());
     mTiles[tile.z][tile.x].tile.reset();
     _n_loaded_tiles--;

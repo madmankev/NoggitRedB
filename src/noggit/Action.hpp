@@ -17,6 +17,7 @@
 
 class MapView;
 class MapChunk;
+class MapTile;
 class SceneObject;
 
 namespace Noggit
@@ -119,6 +120,12 @@ namespace Noggit
 
         bool checkAdressTag(std::uintptr_t address);
         void tagAdress(std::uintptr_t address);
+
+        // Fix for issue #1: returns true when the action holds raw pointers
+        // into a tile's data (chunks, chunk vertices). Such an action must
+        // be invalidated before the tile is unloaded, otherwise undoing it
+        // would dereference freed memory and corrupt the undo stack.
+        bool referencesTile(MapTile const* tile) const;
 
         float* getChunkTerrainOriginalData(MapChunk* chunk);
 

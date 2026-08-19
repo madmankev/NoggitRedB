@@ -27,6 +27,9 @@ namespace Noggit
       void popBack();
       void purge();
       void changeCurrentAction(unsigned index);
+      // Fix for issue #1: full UI rebuild used when actions are dropped from
+      // the middle of the stack (e.g. their tile was unloaded).
+      void rebuild();
 
     signals:
       void currentActionChanged(unsigned index);

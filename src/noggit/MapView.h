@@ -334,6 +334,10 @@ private:
   virtual void keyPressEvent (QKeyEvent*) override;
   virtual void focusOutEvent (QFocusEvent*) override;
   virtual void enterEvent(QEvent*) override;
+  // Fix for issue #3: allow dropping models on the viewport to spawn them
+  virtual void dragEnterEvent(QDragEnterEvent*) override;
+  virtual void dragMoveEvent(QDragMoveEvent*) override;
+  virtual void dropEvent(QDropEvent*) override;
 
   Noggit::Ui::Windows::NoggitWindow* _main_window;
 

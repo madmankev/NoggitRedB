@@ -969,6 +969,24 @@ void WorldRender::draw (glm::mat4x4 const& model_view
               continue;
           }
 
+          // Fix for issue #54: render models that failed to load (missing
+          // or corrupted files) as red error cubes so they stay visible and
+          // selectable in the editor instead of silently disappearing.
+          if (pair.first->finishedLoading() && pair.first->loading_failed())
+          {
+            for (auto const& instance_matrix : pair.second)
+            {
+              Noggit::Rendering::Primitives::WireBox::getInstance(_world->_context).draw(model_view
+                , projection
+                , instance_matrix
+                , { 1.0f, 0.0f, 0.0f, 1.0f } // red
+                , glm::vec3(-1.0f, 0.0f, -1.0f)
+                , glm::vec3(1.0f, 2.0f, 1.0f)
+              );
+            }
+            continue;
+          }
+
           bool draw_animated_boxes = true;
 
           /*if (draw_hidden_models || !pair.first->is_hidden())*/ // now done when building models_to_draw

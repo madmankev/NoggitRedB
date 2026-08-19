@@ -96,6 +96,9 @@ namespace Noggit
       generate_hotkey_row({FontNoggit::ctrl, FontNoggit::shift, FontNoggit::s}, "\a+\a+\aSave ADT tile at camera position", files_layout);
       generate_hotkey_row({FontNoggit::ctrl, FontNoggit::shift, FontNoggit::a}, "\a+\a+\aSave all loaded ADT tiles", files_layout);
       generate_hotkey_row({FontNoggit::g}, "\aSave port commands to ports.txt", files_layout);
+      // Fix for issue #56: document the previously missing keybinds
+      generate_hotkey_row({FontNoggit::ctrl, FontNoggit::z}, "\a+\aUndo", files_layout);
+      generate_hotkey_row({FontNoggit::ctrl, FontNoggit::shift, FontNoggit::z}, "\a+\a+\aRedo", files_layout);
 
       auto adjust_layout(new QFormLayout(this));
       base_layout->addLayout(adjust_layout, 1, 1);
@@ -270,6 +273,8 @@ namespace Noggit
       generate_hotkey_row({FontNoggit::ctrl, FontNoggit::c }, "\a+\aCopy object to clipboard", object_layout);
       generate_hotkey_row({FontNoggit::ctrl, FontNoggit::v }, "\a+\aPaste object on mouse position", object_layout);
       generate_hotkey_row({FontNoggit::ctrl, FontNoggit::b }, "\a+\aDuplicate selected object to mouse position", object_layout);
+      // Fix for issue #56: the Delete key hotkey was missing from the help
+      generate_hotkey_row({}, "\aDel          Delete selected objects", object_layout);
       generate_hotkey_row({FontNoggit::shift, FontNoggit::v }, "\a+\aImport last M2 from WMV", object_layout);
       generate_hotkey_row({FontNoggit::alt, FontNoggit::v }, "\a+\aImport last WMO from WMV", object_layout);
       generate_hotkey_row({FontNoggit::t }, "\aSwitch between paste modes", object_layout);

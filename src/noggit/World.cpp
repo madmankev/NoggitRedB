@@ -1471,9 +1471,6 @@ auto World::stamp(glm::vec3 const& pos, float dt, QImage const* img, float radiu
 , float min_height, float max_height) -> void
 {
   ZoneScoped;
-  auto action = NOGGIT_CUR_ACTION;
-  float delta = action->getDelta() + dt;
-  action->setDelta(delta);
 
   for_all_chunks_in_rect(pos, radiusOuter,
                           [=](MapChunk* chunk) -> bool

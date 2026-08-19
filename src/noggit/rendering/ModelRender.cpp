@@ -383,7 +383,15 @@ void ModelRender::fixShaderIdBlendOverride()
 
       for (int i = 0; i < pass.texture_count; ++i)
       {
-        uint16_t override_blend = _model->blend_override[pass.shader_id + i];
+        // issue #32: guard against out-of-range blend override table
+        // accesses on downported models
+        uint16_t override_blend = 0;
+
+        if (static_cast<size_t>(pass.shader_id + i) < _model->blend_override.size())
+        {
+          override_blend = _model->blend_override[pass.shader_id + i];
+        }
+
         uint16_t texture_unit_lookup = _model->_texture_unit_lookup[pass.texture_coord_combo_index + i];
 
         if (i == 0 && _model->_render_flags[pass.renderflag_index].blend == 0)
@@ -485,13 +493,24 @@ void ModelRender::fixShaderIDLayer()
         some_flags = (some_flags & 0xFF00);
       }
 
-      int16_t texture_unit_lookup = _model->_texture_unit_lookup[pass.texture_coord_combo_index];
+      // Fix for issue #32: downported models can reference texture unit
+      // lookups beyond the table size, guard the accesses instead of
+      // reading out of bounds (undefined behavior / invisible models)
+      int16_t texture_unit_lookup = 0xFFFF;
+
+      if (pass.texture_coord_combo_index < _model->_texture_unit_lookup.size())
+      {
+        texture_unit_lookup = _model->_texture_unit_lookup[pass.texture_coord_combo_index];
+      }
 
       if ((some_flags & 0xFF) < 2)
       {
         if ((_model->_render_flags[pass.renderflag_index].blend == 0) && (pass.texture_count == 2) && ((lower_bits == 4) || (lower_bits == 6)))
         {
-          if (texture_unit_lookup == 0 && (_model->_texture_unit_lookup[pass.texture_coord_combo_index + 1] == -1))
+          bool second_lookup_is_invalid = pass.texture_coord_combo_index + 1 >= _model->_texture_unit_lookup.size()
+              || _model->_texture_unit_lookup[pass.texture_coord_combo_index + 1] == -1;
+
+          if (texture_unit_lookup == 0 && second_lookup_is_invalid)
           {
             some_flags = (some_flags & 0xFF00) | 1;
           }
@@ -802,26 +821,36 @@ void ModelRender::updateBoneMatrices()
 
 ModelRenderPass::ModelRenderPass(ModelTexUnit const& tex_unit, Model* m)
     : ModelTexUnit(tex_unit)
-    , blend_mode(m->_render_flags[renderflag_index].blend)
+    // issue #32: some models reference more render flags than they contain
+    // (mostly downports), clamp instead of reading out of bounds
+    , blend_mode(m->_render_flags.empty() ? 0
+        : m->_render_flags[std::min<size_t>(renderflag_index, m->_render_flags.size() - 1)].blend)
 {
 }
 
 bool ModelRenderPass::prepareDraw(OpenGL::Scoped::use_program& m2_shader, Model *m, OpenGL::M2RenderState& model_render_state)
 {
-  if (!m->showGeosets[submesh] || !pixel_shader)
+  // issue #32: validate all the table indices before using them, models
+  // with missing/invalid tables (mostly downports) used to read out of
+  // bounds and end up invisible or crash the editor
+  if (!pixel_shader || m->_render_flags.empty()
+      || static_cast<size_t>(submesh) >= m->showGeosets.size()
+      || !m->showGeosets[submesh])
   {
     return false;
   }
+
+  uint16_t const safe_renderflag_index = std::min<uint16_t>(renderflag_index, static_cast<uint16_t>(m->_render_flags.size() - 1));
 
   // COLOUR
   // Get the colour and transparency and check that we should even render
   glm::vec4 mesh_color = glm::vec4(1.0f, 1.0f, 1.0f, m->trans); // ??
   glm::vec4 emissive_color = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f);
 
-  auto const& renderflag(m->_render_flags[renderflag_index]);
+  auto const& renderflag(m->_render_flags[safe_renderflag_index]);
 
   // emissive colors
-  if (color_index != -1 && m->_colors[color_index].color.uses(0))
+  if (color_index != -1 && static_cast<size_t>(color_index) < m->_colors.size() && m->_colors[color_index].color.uses(0))
   {
     ::glm::vec3 c (m->_colors[color_index].color.getValue (0, m->_anim_time, m->_global_animtime));
     if (m->_colors[color_index].opacity.uses (m->_current_anim_seq))

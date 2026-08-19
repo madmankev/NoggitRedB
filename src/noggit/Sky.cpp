@@ -738,6 +738,26 @@ Sky* Skies::createNewSky(Sky*  old_sky, unsigned int new_id, glm::vec3& pos)
 // returns the global light, not the highest weight
 Sky* Skies::findSkyWeights(glm::vec3 pos)
 {
+  // Fix for issue #28: sort the skies FIRST, then locate the default sky.
+  // Grabbing a pointer into the vector before sorting left it pointing at
+  // whatever sky landed in that slot after the reorder, i.e. essentially a
+  // random sky as the "global" base light: the lighting flickered whenever
+  // the camera moved (most visible near the map origin where distances flip).
+  // The sort is also made stable with a deterministic tie-break on the sky
+  // id so equally distant skies can't swap order frame to frame.
+  std::stable_sort(skies.begin(), skies.end(), [=](Sky const& a, Sky const& b)
+  {
+    float const dist_a = glm::distance(pos, a.pos);
+    float const dist_b = glm::distance(pos, b.pos);
+
+    if (dist_a == dist_b)
+    {
+      return a.getId() < b.getId();
+    }
+
+    return dist_a > dist_b;
+  });
+
   Sky* default_sky = nullptr;
 
   for (auto& sky : skies)
@@ -748,11 +768,6 @@ Sky* Skies::findSkyWeights(glm::vec3 pos)
       break;
     }
   }
-
-  std::sort(skies.begin(), skies.end(), [=](Sky& a, Sky& b)
-  {
-    return glm::distance(pos, a.pos) > glm::distance(pos, b.pos);
-  });
 
   for (auto& sky : skies)
   {
