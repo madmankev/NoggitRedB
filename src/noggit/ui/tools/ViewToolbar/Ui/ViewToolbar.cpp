@@ -191,6 +191,8 @@ ViewToolbar::ViewToolbar(MapView *mapView, ViewToolbar *tb)
     add_tool_icon(mapView, &mapView->_show_detail_info_window, tr("Details info"), FontNoggit::INFO, tb);
     // Fix for issue #50: log console panel toggle
     add_tool_icon(mapView, &mapView->_show_log_console, tr("Log console"), FontNoggit::WINDOW, tb);
+    // Fix for issue #51: walk mode (player POV) toggle
+    add_tool_icon(mapView, &mapView->_game_mode, tr("Walk mode (player POV)"), FontNoggit::VIEW_MODE_GAME, tb);
 
     // TODO : will open a panel with time controls, or use 2n toolbar
     //add_tool_icon(mapView, &mapView->_game_mode_camera, tr("Time speed"), FontNoggit::TIME_NORMAL, tb, _time_secondary_tool);

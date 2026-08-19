@@ -789,6 +789,31 @@ glm::vec3 World::get_ground_height(glm::vec3 pos)
   return std::get<selected_chunk_type>(hits[0].second).position;
 }
 
+// Fix for issues #46 and #51: quiet variant for per-frame camera logic,
+// returns false when no terrain is hit (e.g. unloaded tile) instead of logging an error.
+bool World::get_ground_height_quiet(glm::vec3 const& pos, glm::vec3& out)
+{
+  selection_result hits;
+
+  for_chunk_at(pos, [&](MapChunk* chunk)
+  {
+    {
+      // ray origin should be independent of the object's current y
+      glm::vec3 ray_pos(pos.x, chunk->getMaxHeight() + 1.0f, pos.z);
+      math::ray intersect_ray(ray_pos, glm::vec3(0.f, -1.f, 0.f));
+      chunk->intersect(intersect_ray, &hits, true);
+    }
+  });
+
+  if (hits.empty())
+  {
+    return false;
+  }
+
+  out = std::get<selected_chunk_type>(hits[0].second).position;
+  return true;
+}
+
 void World::snap_selected_models_to_the_ground()
 {
   ZoneScoped;

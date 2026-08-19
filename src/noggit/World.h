@@ -140,6 +140,9 @@ public:
   void delete_selected_models();
   // note : height is Y axis.
   glm::vec3 get_ground_height(glm::vec3 pos);
+  // Fix for issues #46 and #51: quiet variant for per-frame camera logic, returns false
+  // when there is no terrain under pos (does not log errors every frame).
+  bool get_ground_height_quiet(glm::vec3 const& pos, glm::vec3& out);
   void range_add_to_selection(glm::vec3 const& pos, float radius, bool remove);
   Noggit::world_model_instances_storage& getModelInstanceStorage();;
 

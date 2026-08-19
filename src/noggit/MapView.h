@@ -120,6 +120,10 @@ private:
   Noggit::BoolToggleProperty _debug_cam_mode = { false };
   Noggit::BoolToggleProperty _fps_mode = { false };
   Noggit::BoolToggleProperty _camera_collision = { false };
+  // Fix for issue #51: "game mode" walk around from a player POV.
+  Noggit::BoolToggleProperty _game_mode = { false };
+  // Eye height of the camera above the terrain while in walk/player mode.
+  float _game_mode_eye_height = 1.75f;
 
   bool _camera_moved_since_last_draw = true;
 
@@ -148,7 +152,6 @@ public:
   Noggit::BoolToggleProperty _draw_skybox = { true };
   Noggit::BoolToggleProperty _draw_hidden_models = {false};
   Noggit::BoolToggleProperty _draw_occlusion_boxes = {false};
-  // Noggit::BoolToggleProperty _game_mode_camera = { false };
   Noggit::BoolToggleProperty _draw_lights_zones = { false };
   Noggit::BoolToggleProperty _show_detail_info_window = { false };
   Noggit::BoolToggleProperty _show_minimap_window = { false };

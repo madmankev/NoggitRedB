@@ -2171,6 +2171,32 @@ void MapView::setupViewMenu()
 
   ADD_TOGGLE_NS(view_menu, "Camera Collision", _camera_collision);
 
+  // Fix for issue #51: "game mode", walk around the map from a player POV.
+  // Mutually exclusive with the legacy FPS camera (a cruder take on the same idea).
+  ADD_TOGGLE_NS(view_menu, "Walk mode (player POV)", _game_mode);
+  connect(&_game_mode, &Noggit::BoolToggleProperty::changed
+    , [this](bool game_mode_enabled)
+    {
+      if (!game_mode_enabled)
+        return;
+
+      setCameraDirty();
+      _camera_moved_since_last_draw = true;
+
+      if (_fps_mode.get())
+      {
+        _fps_mode.set(false);
+      }
+
+      // drop the camera to eye height when entering walk mode
+      glm::vec3 ground;
+      if (getWorld()->get_ground_height_quiet(_camera.position, ground))
+      {
+        _camera.position.y = ground.y + _game_mode_eye_height;
+      }
+    }
+  );
+
 }
 
 void MapView::setupToolsMenu()
@@ -3228,7 +3254,21 @@ void MapView::tick (float dt)
 
     if (moving)
     {
-      _camera.move_forward(moving, dt);
+      if (_game_mode.get())
+      {
+        // Fix for issue #51: in walk mode the camera walks on the horizontal plane,
+        // the view pitch only controls where you look, not where you move.
+        glm::vec3 walk_dir = _camera.direction();
+        walk_dir.y = 0.f;
+        if (glm::dot(walk_dir, walk_dir) > 1e-6f)
+        {
+          _camera.position += glm::normalize(walk_dir) * moving * _camera.move_speed * dt;
+        }
+      }
+      else
+      {
+        _camera.move_forward(moving, dt);
+      }
       _camera_moved_since_last_draw = true;
     }
     if (strafing)
@@ -3236,27 +3276,56 @@ void MapView::tick (float dt)
       _camera.move_horizontal(strafing, dt);
       _camera_moved_since_last_draw = true;
     }
-    if (updown)
+    if (updown && !_game_mode.get())
     {
+      // Fix for issue #51: no flying up/down in walk mode, height follows the terrain.
       _camera.move_vertical(updown, dt);
       _camera_moved_since_last_draw = true;
     }
 
-    if (_camera_moved_since_last_draw)
+    // Fix for issue #51: make the camera stick to eye height above the terrain in walk
+    // mode. Runs every tick (not only after moves) so terrain edits and newly streamed
+    // tiles also lift the camera.
+    if (_game_mode.get())
     {
-      if (_fps_mode.get())
+      glm::vec3 ground;
+      if (_world->get_ground_height_quiet(_camera.position, ground))
       {
-        // there is a also hack to update camera when entering mode in void ViewToolbar::add_tool_icon()
-        float h = _world->get_ground_height(_camera.position).y;
-        _camera.position.y = h + 3.f;
-      }
-      else if (_camera_collision.get())
-      {
-        float h = _world.get()->get_ground_height(_camera.position).y;
-        if (_camera.position.y < h + 3.f)
+        float const target = ground.y + _game_mode_eye_height;
+
+        if (_camera.position.y < ground.y + 0.25f)
         {
-          _camera.position.y = h + 3.f;
+          // got pushed under the terrain (terrain raised, tile streamed in): pop back up
+          _camera.position.y = target;
         }
+        else
+        {
+          // smoothly follow the terrain up and down slopes like a walking player
+          _camera.position.y += (target - _camera.position.y) * std::min(1.0f, 12.0f * dt);
+        }
+      }
+    }
+    else if (_camera_collision.get())
+    {
+      // Fix for issue #46: keep the free camera from entering the terrain. Runs every
+      // tick so it also reacts when terrain is edited towards/above the camera.
+      glm::vec3 ground;
+      if (_world->get_ground_height_quiet(_camera.position, ground))
+      {
+        if (_camera.position.y < ground.y + 2.f)
+        {
+          _camera.position.y = ground.y + 2.f;
+          _camera_moved_since_last_draw = true;
+        }
+      }
+    }
+    else if (_fps_mode.get() && _camera_moved_since_last_draw)
+    {
+      // there is a also hack to update camera when entering mode in void ViewToolbar::add_tool_icon()
+      glm::vec3 ground;
+      if (_world->get_ground_height_quiet(_camera.position, ground))
+      {
+        _camera.position.y = ground.y + 3.f;
       }
     }
   }
@@ -3709,7 +3778,8 @@ glm::mat4x4 MapView::projection() const
   }
   else
   {
-    return glm::perspective(_camera.fov()._, aspect_ratio(), _fps_mode.get() ? 0.1f : 1.f, far_z);
+    // Fix for issue #51: walk mode (like the fps camera) needs a tighter near plane as it sits close to the ground.
+    return glm::perspective(_camera.fov()._, aspect_ratio(), (_fps_mode.get() || _game_mode.get()) ? 0.1f : 1.f, far_z);
   }
 }
 

@@ -31,10 +31,10 @@ Working branch: `arena/01a018d4-noggitredb`
 | 37 | Copy asset path in Object Editor | already fixed in baseline |
 | 43 | Object rotation speed framerate dependent | already fixed in baseline |
 | 44 | Patch client with project folder | |
-| 46 | Camera collision | |
+| 46 | Camera collision | fixed |
 | 47 | Invalid ADT offsets not selectable | already fixed in baseline |
 | 50 | Error panel/console | fixed (c2c7b18) |
-| 51 | Game mode | |
+| 51 | Game mode | fixed |
 | 52 | WorldSafeLocs.dbc editor | fixed (d56340e) |
 | 53 | QImage rescale broken (tiled edges import) | fixed (3c48bb6) |
 | 54 | Render missing models as error cubes | fixed (63803f8) |
