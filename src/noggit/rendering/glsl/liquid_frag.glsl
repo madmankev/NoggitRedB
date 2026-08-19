@@ -113,6 +113,22 @@ void main()
 
     //clamp shouldn't be needed
     out_color = vec4 (clamp(texel + lerp, 0.0, 1.0).rgb, lerp.a);
+
+    // Fix for issue #62: water was rendered with flat, unlit colors which made it
+    // stick out next to the lit terrain (very visible on strongly tinted maps like
+    // STV and on generated minimaps). Apply the same hemisphere ambient + sun
+    // diffuse term as the terrain shader, using a constant up normal for the
+    // planar water surface.
+    vec3 surface_normal = vec3(0.0, 1.0, 0.0);
+    float nDotL = clamp(dot(surface_normal, -normalize(LightDir_FogRate.xyz)), 0.0, 1.0);
+
+    vec3 skyColor = (AmbientColor_FogEnd.xyz * 1.10000002);
+    vec3 groundColor = (AmbientColor_FogEnd.xyz * 0.699999988);
+
+    vec3 lAmbient = mix(groundColor, skyColor, 0.5 + (0.5 * nDotL));
+    vec3 lDiffuse = DiffuseColor_FogStart.xyz * nDotL;
+
+    out_color.rgb = clamp(out_color.rgb * (lAmbient + lDiffuse), 0.0, 1.0);
   }
 
   if (FogColor_FogOn.w != 0)

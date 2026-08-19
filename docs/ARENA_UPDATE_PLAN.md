@@ -43,7 +43,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 57 | md5translate.trs wrong formatting for X < 10 | already fixed in baseline |
 | 60 | Rotation gizmo pivot inaccuracy | already fixed in baseline |
 | 61 | Missing rendering features | |
-| 62 | Minimap generation: missing liquid lighting | |
+| 62 | Minimap generation: missing liquid lighting | fixed |
 | 63 | Shader hot reloading | fixed (3d4f4dd) |
 | 64 | Can't remove sound entry files rows | already fixed in baseline |
 | 65 | Waterfalls/animated textures get red placeholder box | already fixed in baseline |
