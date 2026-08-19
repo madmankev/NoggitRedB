@@ -2559,7 +2559,7 @@ void World::importADTAlphamap(glm::vec3 const& pos, QImage const& image, unsigne
 
   if (image.width() != 1024 || image.height() != 1024)
   {
-    QImage scaled = image.scaled(1024, 1024, Qt::AspectRatioMode::IgnoreAspectRatio);
+    QImage scaled = image.scaled(1024, 1024, Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
     for_tile_at ( pos
       , [&] (MapTile* tile)
@@ -2611,7 +2611,7 @@ void World::importADTAlphamap(glm::vec3 const& pos, bool cleanup)
         img.load(filename, "PNG");
 
         if (img.width() != 1024 || img.height() != 1024)
-          img = img.scaled(1024, 1024, Qt::AspectRatioMode::IgnoreAspectRatio);
+          img = img.scaled(1024, 1024, Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
         tile->setAlphaImage(img, i, true);
       }
@@ -2631,7 +2631,7 @@ void World::importADTHeightmap(glm::vec3 const& pos, QImage const& image, float 
 
   if (image.width() != desired_dimensions || image.height() != desired_dimensions)
   {
-    QImage scaled = image.scaled(desired_dimensions, desired_dimensions, Qt::AspectRatioMode::IgnoreAspectRatio);
+    QImage scaled = image.scaled(desired_dimensions, desired_dimensions, Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
     for_tile_at ( pos
       , [&] (MapTile* tile)
@@ -2691,7 +2691,7 @@ void World::importADTHeightmap(glm::vec3 const& pos, float min_height, float max
 
       size_t desiredSize = tiledEdges ? 256 : 257;
       if (img.width() != desiredSize || img.height() != desiredSize)
-        img = img.scaled(static_cast<int>(desiredSize), static_cast<int>(desiredSize), Qt::AspectRatioMode::IgnoreAspectRatio);
+        img = img.scaled(static_cast<int>(desiredSize), static_cast<int>(desiredSize), Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
       tile->setHeightmapImage(img, min_height, max_height, mode, tiledEdges);
 
@@ -2710,7 +2710,7 @@ void World::importADTWatermap(glm::vec3 const& pos, QImage const& image, float m
 
     if (image.width() != desired_dimensions || image.height() != desired_dimensions)
     {
-        QImage scaled = image.scaled(desired_dimensions, desired_dimensions, Qt::AspectRatioMode::IgnoreAspectRatio);
+        QImage scaled = image.scaled(desired_dimensions, desired_dimensions, Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
         for_tile_at(pos
             , [&](MapTile* tile)
@@ -2761,7 +2761,7 @@ void World::importADTVertexColorMap(glm::vec3 const& pos, int mode, bool tiledEd
 
         size_t desiredSize = tiledEdges ? 256 : 257;
         if (img.width() != desiredSize || img.height() != desiredSize)
-          img = img.scaled(static_cast<int>(desiredSize), static_cast<int>(desiredSize), Qt::AspectRatioMode::IgnoreAspectRatio);
+          img = img.scaled(static_cast<int>(desiredSize), static_cast<int>(desiredSize), Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
         tile->setVertexColorImage(img, mode, tiledEdges);
 
@@ -2805,7 +2805,7 @@ void World::importADTVertexColorMap(glm::vec3 const& pos, QImage const& image, i
 
   if (image.width() != desiredDimensions || image.height() != desiredDimensions)
   {
-    QImage scaled = image.scaled(static_cast<int>(desiredDimensions), static_cast<int>(desiredDimensions), Qt::AspectRatioMode::IgnoreAspectRatio);
+    QImage scaled = image.scaled(static_cast<int>(desiredDimensions), static_cast<int>(desiredDimensions), Qt::AspectRatioMode::IgnoreAspectRatio, Qt::SmoothTransformation);
 
     for_tile_at ( pos
       , [&] (MapTile* tile)
@@ -3699,7 +3699,7 @@ void World::importAllADTsAlphamaps(QProgressDialog* progress_dialog)
       QImage img;
       img.load(filename, "PNG");
       if (img.width() != 1024 || img.height() != 1024)
-        img = img.scaled(1024, 1024, Qt::IgnoreAspectRatio);
+        img = img.scaled(1024, 1024, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
 
       mTile->setAlphaImage(img, layer, clean_up);
     }
@@ -3844,7 +3844,7 @@ void World::importAllADTsHeightmaps(QProgressDialog* progress_dialog, float min_
         size_t desiredSize = tiledEdges ? 256 : 257;
         if (img.width() != desiredSize || img.height() != desiredSize)
         {
-          QImage scaled = img.scaled(257, 257, Qt::IgnoreAspectRatio);
+          QImage scaled = img.scaled(257, 257, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
           mTile->setHeightmapImage(scaled, min_height, max_height, mode, tiledEdges);
         }
         else
@@ -3902,7 +3902,7 @@ void World::importAllADTVertexColorMaps(unsigned mode, bool tiledEdges)
         size_t desiredSize = tiledEdges ? 256 : 257;
         if (img.width() != desiredSize || img.height() != desiredSize)
         {
-          QImage scaled = img.scaled(257, 257, Qt::IgnoreAspectRatio);
+          QImage scaled = img.scaled(257, 257, Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
           mTile->setVertexColorImage(scaled, mode, tiledEdges);
         }
         else

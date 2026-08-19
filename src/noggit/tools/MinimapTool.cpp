@@ -199,21 +199,28 @@ namespace Noggit
             if (!saving_minimap)
                 return false;
 
+            // Fix for issue #9: the client expects LOD normal map textures
+            // (*_n.blp) at exactly 256x256, regardless of the resolution
+            // chosen for the other minimap export modes
+            if (settings->export_mode == MinimapGenMode::LOD_MAPTEXTURES_N)
+            {
+                settings->resolution = 256;
+            }
+
             bool modern_features = Noggit::Application::NoggitApplication::instance()->getConfiguration()->modern_features;
             if (modern_features && (settings->export_mode == MinimapGenMode::LOD_MAPTEXTURES || settings->export_mode == MinimapGenMode::LOD_MAPTEXTURES_N))
             {
                 settings->draw_m2 = false;
                 settings->draw_wmo = false;
                 settings->draw_water = false;
-                settings->resolution = 512;
                 settings->file_format = ".blp (DXT5)";
 
                 if (settings->export_mode == MinimapGenMode::LOD_MAPTEXTURES_N)
                 {
                     settings->draw_only_normals = true;
-                    settings->resolution = 256;
                 }
                 else if (settings->export_mode == MinimapGenMode::LOD_MAPTEXTURES) {
+                    settings->resolution = 512;
                     // Point normals upwards for diffuse maptexture baking
                     settings->point_normals_up = true;
                 }
