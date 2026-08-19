@@ -697,6 +697,9 @@ void MapView::setupLogConsole()
 
   _show_log_console.set(_settings->value("map_view/log_console", false).toBool());
 
+  // apply the initial state, set() emits no signal when the value doesn't change
+  _log_console_dock->setVisible(_show_log_console.get());
+
   connect ( &_show_log_console, &Noggit::BoolToggleProperty::changed
     , [this]
           {

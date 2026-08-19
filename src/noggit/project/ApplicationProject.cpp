@@ -9,6 +9,7 @@
 
 #include <blizzard-database-library/include/BlizzardDatabase.h>
 #include <blizzard-archive-library/include/CASCArchive.hpp>
+#include <algorithm>
 #include <string>
 #include <blizzard-archive-library/include/Exception.hpp>
 #include <blizzard-archive-library/include/ClientFile.hpp>
