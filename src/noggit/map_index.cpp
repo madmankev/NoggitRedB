@@ -1,6 +1,7 @@
 // This file is part of Noggit3, licensed under GNU General Public License (version 3).
 
 #include <math/coordinates.hpp>
+#include <math/frustum.hpp>
 #include <noggit/AsyncLoader.h>
 #include <noggit/MapChunk.h>
 #include <noggit/MapTile.h>
@@ -21,6 +22,8 @@
 #include <QRegExp>
 #include <QFile>
 
+#include <algorithm>
+#include <cmath>
 #include <forward_list>
 #include <sstream>
 
@@ -337,6 +340,115 @@ void MapIndex::enterTile(const TileIndex& tile)
     {
       loadTile(TileIndex(px, pz));
     }
+  }
+}
+
+// Issue #34: standard view based tile loading. Tiles whose bounding box is in the
+// camera frustum and within view distance of the camera are queued for loading,
+// nearest first. Only a few loads are started per call so that flying around
+// doesn't cause the micro stutters and freezes bulk loading used to cause.
+void MapIndex::enterTileFrustum(const TileIndex& current, math::frustum const& frustum
+  , glm::vec3 const& camera_pos, float view_distance)
+{
+  int const cx = static_cast<int>(current.x);
+  int const cz = static_cast<int>(current.z);
+
+  int const tile_range = std::min(static_cast<int>(std::ceil(view_distance / TILESIZE)), 63);
+
+  int const min_x = std::max(cx - tile_range, 0);
+  int const max_x = std::min(cx + tile_range, 63);
+  int const min_z = std::max(cz - tile_range, 0);
+  int const max_z = std::min(cz + tile_range, 63);
+
+  // collect the candidates ordered by distance so near tiles load first
+  std::vector<std::pair<float, TileIndex>> candidates;
+
+  for (int z = min_z; z <= max_z; ++z)
+  {
+    for (int x = min_x; x <= max_x; ++x)
+    {
+      TileIndex const tile(static_cast<std::size_t>(x), static_cast<std::size_t>(z));
+
+      if (!hasTile(tile) || tileLoaded(tile) || tileAwaitingLoading(tile))
+      {
+        continue;
+      }
+
+      float const distance = misc::getShortestDist(camera_pos.x, camera_pos.z
+        , static_cast<float>(x) * TILESIZE, static_cast<float>(z) * TILESIZE, TILESIZE);
+
+      if (distance > view_distance)
+      {
+        continue;
+      }
+
+      // tiles close to the camera are loaded even when out of view (the user can
+      // turn around or move backwards), further tiles must be visible
+      if (distance > TILESIZE * 0.5f)
+      {
+        glm::vec3 const tile_min(static_cast<float>(x) * TILESIZE, -500.f, static_cast<float>(z) * TILESIZE);
+        glm::vec3 const tile_max((static_cast<float>(x) + 1.f) * TILESIZE, 500.f, (static_cast<float>(z) + 1.f) * TILESIZE);
+
+        if (!frustum.intersects(tile_max, tile_min))
+        {
+          continue;
+        }
+      }
+
+      candidates.emplace_back(distance, tile);
+    }
+  }
+
+  if (candidates.empty())
+  {
+    return;
+  }
+
+  std::sort(candidates.begin(), candidates.end(),
+    [](std::pair<float, TileIndex> const& lhs, std::pair<float, TileIndex> const& rhs)
+    {
+      return lhs.first < rhs.first;
+    });
+
+  // only start a limited number of loads per tick to avoid stutters
+  constexpr std::size_t max_loads_per_tick = 2;
+
+  std::size_t loads = 0;
+  for (auto const& candidate : candidates)
+  {
+    if (loads >= max_loads_per_tick)
+    {
+      break;
+    }
+
+    if (loadTile(candidate.second))
+    {
+      ++loads;
+    }
+  }
+}
+
+// Issue #34: view distance based tile unloading.
+void MapIndex::unloadTilesBeyond(glm::vec3 const& camera_pos, float max_distance)
+{
+  if (((clock() / CLOCKS_PER_SEC) - _last_unload_time) > _unload_interval)
+  {
+    for (MapTile* adt : loaded_tiles())
+    {
+      float const distance = misc::getShortestDist(camera_pos.x, camera_pos.z
+        , static_cast<float>(adt->index.x) * TILESIZE, static_cast<float>(adt->index.z) * TILESIZE, TILESIZE);
+
+      if (distance > max_distance)
+      {
+        //Only unload adts not marked to save
+        if (!adt->changed.load())
+        {
+          unloadTile(adt->index);
+        }
+      }
+    }
+
+    _last_unload_time = clock() / CLOCKS_PER_SEC;
   }
 }
 

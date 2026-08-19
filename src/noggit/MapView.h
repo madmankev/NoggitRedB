@@ -120,6 +120,9 @@ private:
   Noggit::BoolToggleProperty _debug_cam_mode = { false };
   Noggit::BoolToggleProperty _fps_mode = { false };
   Noggit::BoolToggleProperty _camera_collision = { false };
+  // Fix for issue #34: load/unload tiles based on the camera frustum and view
+  // distance instead of a fixed radius around the current tile.
+  Noggit::BoolToggleProperty _view_distance_tile_loading = { true };
   // Fix for issue #51: "game mode" walk around from a player POV.
   Noggit::BoolToggleProperty _game_mode = { false };
   // Eye height of the camera above the terrain while in walk/player mode.

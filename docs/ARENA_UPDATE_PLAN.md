@@ -25,7 +25,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 30 | Raise&Lower Min/Max blending | already fixed in baseline |
 | 32 | Some downported M2 models do not render | fixed (63803f8) |
 | 33 | Shading does not update when importing heightmaps | already fixed in baseline |
-| 34 | Standard rendering and tile loading (frustum) | |
+| 34 | Standard rendering and tile loading (frustum) | fixed |
 | 35 | Massive useless memory allocation (texture_set) | already fixed in baseline |
 | 36 | Object Palette Save/Load | fixed |
 | 37 | Copy asset path in Object Editor | already fixed in baseline |

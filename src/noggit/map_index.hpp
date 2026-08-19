@@ -12,6 +12,11 @@
 #include <mutex>
 #include <string>
 
+namespace math
+{
+  class frustum;
+}
+
 
 enum class uid_fix_status
 {
@@ -158,6 +163,13 @@ public:
   void create_empty_wdl() const;
 
   void enterTile(const TileIndex& tile);
+
+  // Issue #34: load tiles that are in the camera frustum and within view_distance
+  // of the camera (nearest first, rate limited per call to avoid the micro stutters
+  // and freezes bulk loading caused).
+  void enterTileFrustum(const TileIndex& current, math::frustum const& frustum
+    , glm::vec3 const& camera_pos, float view_distance);
+
   MapTile *loadTile(const TileIndex& tile, bool reloading = false, bool load_models = true, bool load_textures = true);
 
   void update_model_tile(const TileIndex& tile, model_update type, SceneObject* instance);
@@ -173,6 +185,10 @@ public:
   void saveChanged (World*, bool save_unloaded = false);
   void reloadTile(const TileIndex& tile);
   void unloadTiles(const TileIndex& tile);  // unloads all tiles more then x adts away from given
+
+  // Issue #34: unloads all unchanged tiles whose rectangle is further than
+  // max_distance from the camera position (view distance based unloading).
+  void unloadTilesBeyond(glm::vec3 const& camera_pos, float max_distance);
   void unloadTile(const TileIndex& tile);  // unload given tile
   void markOnDisc(const TileIndex& tile, bool mto);
   bool isTileExternal(const TileIndex& tile) const;

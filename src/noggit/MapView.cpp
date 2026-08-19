@@ -1,4 +1,5 @@
 // This file is part of Noggit3, licensed under GNU General Public License (version 3).
+#include <math/frustum.hpp>
 #include <noggit/DBC.h>
 #include <noggit/MapChunk.h>
 #include <noggit/MapView.h>
@@ -2171,6 +2172,11 @@ void MapView::setupViewMenu()
 
   ADD_TOGGLE_NS(view_menu, "Camera Collision", _camera_collision);
 
+  // Fix for issue #34: load/unload the tiles that are in the camera view and
+  // within view distance (standard approach) instead of a fixed radius
+  // around the current tile (core game behavior).
+  ADD_TOGGLE_NS(view_menu, "View distance tile loading", _view_distance_tile_loading);
+
   // Fix for issue #51: "game mode", walk around the map from a player POV.
   // Mutually exclusive with the legacy FPS camera (a cruder take on the same idea).
   ADD_TOGGLE_NS(view_menu, "Walk mode (player POV)", _game_mode);
@@ -3205,10 +3211,9 @@ void MapView::tick (float dt)
 
   NOGGIT_ACTION_MGR->endActionOnModalityMismatch(action_modality);
 
-  // start unloading tiles
-  _world->mapIndex.enterTile (TileIndex (_camera.position));
-  if (_unload_tiles)
-    _world->mapIndex.unloadTiles (TileIndex (_camera.position));
+  // Fix for issue #34: tile loading/unloading moved after the camera update below,
+  // so the frustum based loading path can use an up to date frustum. The legacy
+  // radius based path is kept as an option.
 
   dt = std::min(dt, 1.0f);
 
@@ -3353,6 +3358,34 @@ void MapView::tick (float dt)
   // udpate MVP after moving camera
   _model_view = model_view(_debug_cam_mode.get());
   _projection = projection();
+
+  // Fix for issue #34: load the tiles that are in the camera view and within
+  // view distance, with view distance based unloading (using the freshly updated
+  // matrices so the frustum matches the current frame).
+  if (_view_distance_tile_loading.get() && _display_mode == display_mode::in_3D)
+  {
+    math::frustum const tile_loading_frustum(_projection * _model_view);
+
+    float const stream_distance = std::max(_world->renderer()->_view_distance, TILESIZE);
+
+    _world->mapIndex.enterTileFrustum (TileIndex (_camera.position)
+      , tile_loading_frustum
+      , _camera.position
+      , stream_distance);
+
+    if (_unload_tiles)
+    {
+      // keep a margin so tiles don't ping-pong between loaded and unloaded
+      _world->mapIndex.unloadTilesBeyond (_camera.position, stream_distance * 1.5f + TILESIZE);
+    }
+  }
+  else
+  {
+    // legacy radius based loading around the current tile (and only mode in tile view)
+    _world->mapIndex.enterTile (TileIndex (_camera.position));
+    if (_unload_tiles)
+      _world->mapIndex.unloadTiles (TileIndex (_camera.position));
+  }
 
   // update cursor pos after camera
   auto cur_action = NOGGIT_CUR_ACTION;
