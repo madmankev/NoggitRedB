@@ -1326,18 +1326,41 @@ void WorldRender::draw (glm::mat4x4 const& model_view
   {
     ZoneScopedN("World::draw() : Draw M2s blended batches (above water)");
 
-    bool has_late_blended_models = false;
+    // Fix for issue #2: alpha blended batches must be drawn back to front,
+    // sort the models with blended batches by their distance to the camera,
+    // furthest first (additive blends are order independent, alpha is not).
+    std::vector<std::pair<Model*, std::vector<glm::mat4x4> const*>> late_blended_models;
+    late_blended_models.reserve(models_to_draw.size());
 
     for (auto const& pair : models_to_draw)
     {
-      if (pair.first->renderer()->hasLateBlendedPasses())
+      if (!pair.second.empty() && pair.first->renderer()->hasLateBlendedPasses())
       {
-        has_late_blended_models = true;
-        break;
+        late_blended_models.emplace_back(pair.first, &pair.second);
       }
     }
 
-    if (has_late_blended_models)
+    if (!late_blended_models.empty())
+    {
+      auto const closest_distance = [&camera_pos] (std::vector<glm::mat4x4> const& instances)
+      {
+        float closest = std::numeric_limits<float>::max();
+        for (auto const& instance_matrix : instances)
+        {
+          closest = std::min(closest, glm::length(glm::vec3(instance_matrix[3]) - camera_pos));
+        }
+        return closest;
+      };
+
+      std::sort(late_blended_models.begin(), late_blended_models.end(),
+        [&closest_distance] (auto const& lhs, auto const& rhs)
+        {
+          // furthest first
+          return closest_distance(*lhs.second) > closest_distance(*rhs.second);
+        });
+    }
+
+    if (!late_blended_models.empty())
     {
       OpenGL::Scoped::use_program m2_shader {*_m2_instanced_program.get()};
 
@@ -1356,10 +1379,10 @@ void WorldRender::draw (glm::mat4x4 const& model_view
       m2_shader.uniform("tex_unit_lookup_2", 0);
       m2_shader.uniform("pixel_shader", 0);
 
-      for (auto const& pair : models_to_draw)
+      for (auto const& pair : late_blended_models)
       {
         pair.first->renderer()->draw( model_view
-            , pair.second
+            , *pair.second
             , m2_shader
             , model_render_state
             , frustum

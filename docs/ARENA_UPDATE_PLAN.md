@@ -7,7 +7,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | # | Title | Status |
 |---|-------|--------|
 | 1 | Undo Stack corrupts sometimes (stamp brush) | fixed (63803f8) |
-| 2 | Batch sorting for rendering (transparency) | |
+| 2 | Batch sorting for rendering (transparency) | fixed |
 | 3 | Asset browser / Object palette MIME data format | fixed (63803f8) |
 | 4 | World loaded multiple times in map selector | already fixed in baseline |
 | 7 | Optional runtime test coverage for assets | |
