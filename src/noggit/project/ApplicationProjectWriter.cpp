@@ -111,12 +111,31 @@ namespace Noggit::Project
           json_object_palette.insert("Filepaths", json_filepaths);
 
           json_object_palette.insert("MapId", objectPalette.MapId);
+          // Fix for issue #36: palette name (ignored by older readers).
+          json_object_palette.insert("Name", objectPalette.Name.c_str());
 
           object_palettes.push_back(json_object_palette);
       }
 
+      // Fix for issue #36: named palettes, saved separately so they can be loaded on any map.
+      auto named_object_palettes = QJsonArray();
+      for (auto const& named_palette : project->NamedObjectPalettes)
+      {
+          auto json_named_palette = QJsonObject();
+
+          auto json_filepaths = QJsonArray();
+          for (auto& filepath : named_palette.Filepaths)
+              json_filepaths.push_back(filepath.c_str());
+          json_named_palette.insert("Filepaths", json_filepaths);
+
+          json_named_palette.insert("Name", named_palette.Name.c_str());
+
+          named_object_palettes.push_back(json_named_palette);
+      }
+
       root.insert("TexturePalettes", texture_palettes);
       root.insert("ObjectPalettes", object_palettes);
+      root.insert("NamedObjectPalettes", named_object_palettes);
       document.setObject(root);
 
       project_configuration_file.write(document.toJson(QJsonDocument::Indented));

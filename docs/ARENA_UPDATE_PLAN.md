@@ -27,7 +27,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 33 | Shading does not update when importing heightmaps | already fixed in baseline |
 | 34 | Standard rendering and tile loading (frustum) | |
 | 35 | Massive useless memory allocation (texture_set) | already fixed in baseline |
-| 36 | Object Palette Save/Load | |
+| 36 | Object Palette Save/Load | fixed |
 | 37 | Copy asset path in Object Editor | already fixed in baseline |
 | 43 | Object rotation speed framerate dependent | already fixed in baseline |
 | 44 | Patch client with project folder | |

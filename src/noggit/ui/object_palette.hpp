@@ -12,6 +12,7 @@
 
 class QGridLayout;
 class QPushButton;
+class QComboBox;
 class QDropEvent;
 class QDragEnterEvent;
 class QMouseEvent;
@@ -62,6 +63,14 @@ namespace Noggit
 
       void SavePalette();
 
+      // Fix for issue #36: named palettes that can be saved, loaded, deleted and
+      // exported/imported as files to share with other designers or workstations.
+      void saveCurrentPaletteAsNamed();
+      void loadNamedPalette(int index);
+      void deleteSelectedNamedPalette();
+      void exportPaletteToFile();
+      void importPaletteFromFile();
+
       void removeObject(QString filename);
 
       void removeSelectedTexture();
@@ -79,10 +88,21 @@ namespace Noggit
       ObjectList* _object_list;
       QPushButton* _add_button;
       QPushButton* _remove_button;
+      // Fix for issue #36: named palette controls
+      QComboBox* _palette_selector;
+      QPushButton* _save_named_button;
+      QPushButton* _delete_named_button;
+      QPushButton* _export_button;
+      QPushButton* _import_button;
       std::unordered_set<std::string> _object_paths;
       MapView* _map_view;
       Noggit::Ui::Tools::PreviewRenderer* _preview_renderer;
       std::shared_ptr<Noggit::Project::NoggitProject> _project;
+
+      // Fix for issue #36: refill the named palette dropdown, keeping the selection when possible.
+      void refreshPaletteSelector(QString const& select_name = QString());
+      // Fix for issue #36: remove all objects from the list without touching saved palettes.
+      void clearPaletteObjects();
 
     };
   }

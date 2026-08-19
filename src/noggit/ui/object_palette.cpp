@@ -2,6 +2,7 @@
 
 #include "object_palette.hpp"
 
+#include <noggit/Log.h>
 #include <noggit/MapView.h>
 #include <noggit/project/ApplicationProject.h>
 #include <noggit/ui/FontAwesome.hpp>
@@ -10,15 +11,26 @@
 #include <noggit/World.h>
 
 #include <QDockWidget>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMimeData>
+#include <QSignalBlocker>
 #include <QtGui/QDrag>
 #include <QtGui/QDragEnterEvent>
 #include <QtGui/QDropEvent>
 #include <QtGui/QMouseEvent>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QComboBox>
+#include <QtWidgets/QFileDialog>
 #include <QtWidgets/QGridLayout>
+#include <QtWidgets/QHBoxLayout>
+#include <QtWidgets/QInputDialog>
+#include <QtWidgets/QLineEdit>
 #include <QtWidgets/QListWidget>
 #include <QtWidgets/QListWidgetItem>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 
 #include <string>
@@ -129,6 +141,49 @@ namespace Noggit
 
       layout->addLayout(button_layout, 0, 1);
 
+      // Fix for issue #36: named palette controls. Palettes can be saved under a name,
+      // reloaded on any map, deleted, and exported/imported as files to share with
+      // other designers or move between workstations.
+      auto palette_controls = new QHBoxLayout(this);
+
+      _palette_selector = new QComboBox(this);
+      _palette_selector->setToolTip("Saved palettes: select one to load it here");
+      palette_controls->addWidget(_palette_selector, 1);
+      connect(_palette_selector, QOverload<int>::of(&QComboBox::activated)
+        , this, &ObjectPalette::loadNamedPalette);
+
+      _save_named_button = new QPushButton(this);
+      _save_named_button->setToolTip("Save current objects as a named palette");
+      _save_named_button->setIcon(FontAwesomeIcon(FontAwesome::save));
+      palette_controls->addWidget(_save_named_button);
+      connect(_save_named_button, &QAbstractButton::clicked
+        , this, &ObjectPalette::saveCurrentPaletteAsNamed);
+
+      _delete_named_button = new QPushButton(this);
+      _delete_named_button->setToolTip("Delete the selected named palette");
+      _delete_named_button->setIcon(FontAwesomeIcon(FontAwesome::trash));
+      palette_controls->addWidget(_delete_named_button);
+      connect(_delete_named_button, &QAbstractButton::clicked
+        , this, &ObjectPalette::deleteSelectedNamedPalette);
+
+      _export_button = new QPushButton(this);
+      _export_button->setToolTip("Export current objects to a palette file (to share it)");
+      _export_button->setIcon(FontAwesomeIcon(FontAwesome::upload));
+      palette_controls->addWidget(_export_button);
+      connect(_export_button, &QAbstractButton::clicked
+        , this, &ObjectPalette::exportPaletteToFile);
+
+      _import_button = new QPushButton(this);
+      _import_button->setToolTip("Import a palette file (from another designer/workstation)");
+      _import_button->setIcon(FontAwesomeIcon(FontAwesome::download));
+      palette_controls->addWidget(_import_button);
+      connect(_import_button, &QAbstractButton::clicked
+        , this, &ObjectPalette::importPaletteFromFile);
+
+      layout->addLayout(palette_controls, 1, 0, 1, 2);
+
+      refreshPaletteSelector();
+
       LoadSavedPalette();
     }
 
@@ -156,6 +211,202 @@ namespace Noggit
             palette_obj.Filepaths.push_back(path);
 
         _project->saveObjectPalette(palette_obj);
+    }
+
+    // Fix for issue #36: named palettes
+
+    void ObjectPalette::refreshPaletteSelector(QString const& select_name)
+    {
+      const QSignalBlocker blocker(_palette_selector);
+
+      _palette_selector->clear();
+
+      // empty user data = the per-map auto saved palette
+      _palette_selector->addItem("Map palette (per map)", QString());
+
+      for (auto const& named_palette : _project->NamedObjectPalettes)
+      {
+        _palette_selector->addItem(named_palette.Name.c_str(), named_palette.Name.c_str());
+      }
+
+      int restore = _palette_selector->findData(select_name);
+      _palette_selector->setCurrentIndex(restore >= 0 ? restore : 0);
+    }
+
+    void ObjectPalette::clearPaletteObjects()
+    {
+      _object_paths.clear();
+      _object_list->clear();
+    }
+
+    void ObjectPalette::loadNamedPalette(int index)
+    {
+      if (index < 0)
+        return;
+
+      QString const name = _palette_selector->itemData(index).toString();
+
+      clearPaletteObjects();
+
+      if (name.isEmpty())
+      {
+        // the per-map auto saved palette
+        LoadSavedPalette();
+        return;
+      }
+
+      for (auto const& named_palette : _project->NamedObjectPalettes)
+      {
+        if (named_palette.Name == name.toStdString())
+        {
+          for (auto const& filename : named_palette.Filepaths)
+          {
+            addObjectByFilename(filename.c_str(), false);
+          }
+          return;
+        }
+      }
+    }
+
+    void ObjectPalette::saveCurrentPaletteAsNamed()
+    {
+      QString const current_name = _palette_selector->currentData().toString();
+
+      bool ok = false;
+      QString const name = QInputDialog::getText(this
+        , tr("Save palette")
+        , tr("Palette name:")
+        , QLineEdit::Normal
+        , current_name
+        , &ok).trimmed();
+
+      if (!ok || name.isEmpty())
+        return;
+
+      auto palette_obj = Noggit::Project::NoggitProjectObjectPalette();
+      palette_obj.MapId = -1;
+      palette_obj.Name = name.toStdString();
+      for (auto& path : _object_paths)
+        palette_obj.Filepaths.push_back(path);
+
+      _project->saveNamedObjectPalette(palette_obj);
+
+      // show the palette as loaded, so further work continues on it
+      refreshPaletteSelector(name);
+    }
+
+    void ObjectPalette::deleteSelectedNamedPalette()
+    {
+      QString const name = _palette_selector->currentData().toString();
+
+      if (name.isEmpty())
+      {
+        // the per-map palette cannot be deleted from here
+        return;
+      }
+
+      if (QMessageBox::question(this
+          , tr("Delete palette")
+          , tr("Delete palette '%1'?").arg(name)) != QMessageBox::Yes)
+      {
+        return;
+      }
+
+      _project->deleteNamedObjectPalette(name.toStdString());
+      refreshPaletteSelector();
+    }
+
+    void ObjectPalette::exportPaletteToFile()
+    {
+      QString name = _palette_selector->currentData().toString();
+      if (name.isEmpty())
+      {
+        name = "palette";
+      }
+
+      QString const filepath = QFileDialog::getSaveFileName(this
+        , tr("Export palette")
+        , name + ".noggitpalette"
+        , tr("Noggit palette (*.noggitpalette *.json)"));
+
+      if (filepath.isEmpty())
+        return;
+
+      QFile out_file(filepath);
+      if (!out_file.open(QIODevice::WriteOnly | QFile::Truncate))
+      {
+        LogError << "Unable to export palette to " << filepath.toStdString() << std::endl;
+        QMessageBox::warning(this, tr("Export palette"), tr("Could not write the file."));
+        return;
+      }
+
+      QJsonObject root;
+      QJsonArray filepaths;
+      for (auto& path : _object_paths)
+        filepaths.push_back(path.c_str());
+
+      root.insert("Name", name);
+      root.insert("Filepaths", filepaths);
+
+      out_file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+      out_file.close();
+    }
+
+    void ObjectPalette::importPaletteFromFile()
+    {
+      QString const filepath = QFileDialog::getOpenFileName(this
+        , tr("Import palette")
+        , QString()
+        , tr("Noggit palette (*.noggitpalette *.json);;All files (*)"));
+
+      if (filepath.isEmpty())
+        return;
+
+      QFile in_file(filepath);
+      if (!in_file.open(QIODevice::ReadOnly))
+      {
+        LogError << "Unable to import palette from " << filepath.toStdString() << std::endl;
+        QMessageBox::warning(this, tr("Import palette"), tr("Could not read the file."));
+        return;
+      }
+
+      auto const json_doc = QJsonDocument::fromJson(in_file.readAll());
+      in_file.close();
+
+      if (!json_doc.isObject())
+      {
+        LogError << "Invalid palette file " << filepath.toStdString() << std::endl;
+        QMessageBox::warning(this, tr("Import palette"), tr("The file is not a valid palette."));
+        return;
+      }
+
+      QJsonObject root = json_doc.object();
+
+      QString name = root.value("Name").toString().trimmed();
+      if (name.isEmpty())
+      {
+        name = QFileInfo(filepath).completeBaseName();
+      }
+
+      auto palette_obj = Noggit::Project::NoggitProjectObjectPalette();
+      palette_obj.MapId = -1;
+      palette_obj.Name = name.toStdString();
+
+      auto const json_filepaths = root.value("Filepaths").toArray();
+      for (auto const& json_filepath : json_filepaths)
+      {
+        palette_obj.Filepaths.push_back(json_filepath.toString().toStdString());
+      }
+
+      // store it with the saved palettes and load it right away
+      _project->saveNamedObjectPalette(palette_obj);
+      refreshPaletteSelector(name);
+
+      clearPaletteObjects();
+      for (auto const& filename : palette_obj.Filepaths)
+      {
+        addObjectByFilename(filename.c_str(), false);
+      }
     }
 
     void ObjectPalette::addObjectFromAssetBrowser()

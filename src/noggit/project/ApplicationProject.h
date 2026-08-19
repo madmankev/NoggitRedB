@@ -82,6 +82,9 @@ namespace Noggit::Project
   struct NoggitProjectObjectPalette
   {
       int MapId;
+      // Fix for issue #36: optional name for user saved palettes. Empty name = legacy
+      // per-map auto saved palette.
+      std::string Name;
       std::vector<std::string> Filepaths;
   };
 
@@ -111,6 +114,9 @@ namespace Noggit::Project
     std::shared_ptr<BlizzardDatabaseLib::BlizzardDatabase> ClientDatabase;
     std::shared_ptr<BlizzardArchive::ClientData> ClientData;
     std::vector<NoggitProjectObjectPalette> ObjectPalettes;
+    // Fix for issue #36: named object palettes that can be loaded on any map and shared
+    // with other designers/workstations. Uses the same struct, Name is set there.
+    std::vector<NoggitProjectObjectPalette> NamedObjectPalettes;
     std::vector<NoggitProjectTexturePalette> TexturePalettes;
     std::vector<NoggitProjectSelectionGroups> ObjectSelectionGroups;
 
@@ -130,6 +136,11 @@ namespace Noggit::Project
     void saveTexturePalette(const NoggitProjectTexturePalette& new_texture_palette);
 
     void saveObjectPalette(const NoggitProjectObjectPalette& new_object_palette);
+
+    // Fix for issue #36: named object palettes (upsert/delete by name).
+    void saveNamedObjectPalette(const NoggitProjectObjectPalette& new_named_palette);
+
+    void deleteNamedObjectPalette(const std::string& name);
 
     void saveObjectSelectionGroups(const NoggitProjectSelectionGroups& new_selection_groups);
   };

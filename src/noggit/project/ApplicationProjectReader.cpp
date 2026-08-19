@@ -137,11 +137,13 @@ namespace Noggit::Project
 
           if (root.contains("TexturePalettes") && root["TexturePalettes"].isArray())
           {
-              auto project_texture_palettes = root["ObjectPalettes"].toArray();
+              // Fix: texture palettes were read from the wrong array ("ObjectPalettes")
+              // and pushed into the wrong vector, so saved texture palettes never loaded.
+              auto project_texture_palettes = root["TexturePalettes"].toArray();
 
               for (auto const& json_texture_palette : project_texture_palettes)
               {
-                  auto texture_palette = NoggitProjectObjectPalette();
+                  auto texture_palette = NoggitProjectTexturePalette();
                   texture_palette.MapId = json_texture_palette.toObject().value("MapId").toInt();
                   auto json_filepaths = json_texture_palette.toObject().value("Filepaths").toArray();
 
@@ -150,7 +152,7 @@ namespace Noggit::Project
                       std::string filepath = json_filepath.toString().toStdString();
                       texture_palette.Filepaths.push_back(filepath);
                   }
-                  project->ObjectPalettes.push_back(texture_palette);
+                  project->TexturePalettes.push_back(texture_palette);
               }
           }
 
@@ -162,6 +164,8 @@ namespace Noggit::Project
               {
                   auto object_palette = NoggitProjectObjectPalette();
                   object_palette.MapId = json_object_palette.toObject().value("MapId").toInt();
+                  // Fix for issue #36: optional palette name, missing in files saved by older versions.
+                  object_palette.Name = json_object_palette.toObject().value("Name").toString().toStdString();
                   auto json_filepaths = json_object_palette.toObject().value("Filepaths").toArray();
 
                   for (auto const& json_filepath : json_filepaths)
@@ -170,6 +174,31 @@ namespace Noggit::Project
                       object_palette.Filepaths.push_back(filepath);
                   }
                   project->ObjectPalettes.push_back(object_palette);
+              }
+          }
+
+          // Fix for issue #36: named palettes readable on any map.
+          if (root.contains("NamedObjectPalettes") && root["NamedObjectPalettes"].isArray())
+          {
+              auto project_named_palettes = root["NamedObjectPalettes"].toArray();
+
+              for (auto const& json_named_palette : project_named_palettes)
+              {
+                  auto named_palette = NoggitProjectObjectPalette();
+                  named_palette.MapId = -1;
+                  named_palette.Name = json_named_palette.toObject().value("Name").toString().toStdString();
+                  auto json_filepaths = json_named_palette.toObject().value("Filepaths").toArray();
+
+                  for (auto const& json_filepath : json_filepaths)
+                  {
+                      std::string filepath = json_filepath.toString().toStdString();
+                      named_palette.Filepaths.push_back(filepath);
+                  }
+
+                  if (!named_palette.Name.empty())
+                  {
+                      project->NamedObjectPalettes.push_back(named_palette);
+                  }
               }
           }
       }

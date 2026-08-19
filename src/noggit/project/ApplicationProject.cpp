@@ -335,6 +335,33 @@ namespace Noggit::Project
       _projectWriter->savePalettes(this, std::filesystem::path(ProjectPath));
     }
 
+    // Fix for issue #36: named object palettes, upserted by name.
+    void NoggitProject::saveNamedObjectPalette(const NoggitProjectObjectPalette& new_named_palette)
+    {
+      NamedObjectPalettes.erase(std::remove_if(NamedObjectPalettes.begin(), NamedObjectPalettes.end(),
+        [=](NoggitProjectObjectPalette obj_palette)
+        {
+          return obj_palette.Name == new_named_palette.Name;
+        }),
+        NamedObjectPalettes.end());
+
+      NamedObjectPalettes.push_back(new_named_palette);
+
+      _projectWriter->savePalettes(this, std::filesystem::path(ProjectPath));
+    }
+
+    void NoggitProject::deleteNamedObjectPalette(const std::string& name)
+    {
+      NamedObjectPalettes.erase(std::remove_if(NamedObjectPalettes.begin(), NamedObjectPalettes.end(),
+        [=](NoggitProjectObjectPalette obj_palette)
+        {
+          return obj_palette.Name == name;
+        }),
+        NamedObjectPalettes.end());
+
+      _projectWriter->savePalettes(this, std::filesystem::path(ProjectPath));
+    }
+
     void NoggitProject::saveObjectSelectionGroups(const NoggitProjectSelectionGroups& new_selection_groups)
     {
       ObjectSelectionGroups.erase(std::remove_if(ObjectSelectionGroups.begin(), ObjectSelectionGroups.end(),
