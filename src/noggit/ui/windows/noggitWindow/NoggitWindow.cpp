@@ -9,6 +9,7 @@
 #include <noggit/ui/FontAwesome.hpp>
 #include <noggit/ui/FramelessWindow.hpp>
 #include <noggit/ui/minimap_widget.hpp>
+#include <noggit/ui/widgets/AssetTestDialog.hpp>
 #include <noggit/ui/tools/MapCreationWizard/Ui/MapCreationWizard.hpp>
 #include <noggit/ui/tools/UiCommon/StackedWidget.hpp>
 #include <noggit/ui/UidFixWindow.hpp>
@@ -135,6 +136,16 @@ namespace Noggit::Ui::Windows
     QObject::connect(about_action, &QAction::triggered, [&]
                      {
                        _about->show();
+                     }
+    );
+
+    // Issue #7: runtime test coverage for reading and rendering assets
+    auto asset_test_action(file_menu->addAction("Asset render test (dev)"));
+    QObject::connect(asset_test_action, &QAction::triggered, [this]
+                     {
+                       auto asset_test_dialog = new Noggit::Ui::AssetTestDialog(this);
+                       asset_test_dialog->setAttribute(Qt::WA_DeleteOnClose);
+                       asset_test_dialog->show();
                      }
     );
 

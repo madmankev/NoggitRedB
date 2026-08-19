@@ -10,7 +10,7 @@ Working branch: `arena/01a018d4-noggitredb`
 | 2 | Batch sorting for rendering (transparency) | fixed |
 | 3 | Asset browser / Object palette MIME data format | fixed (63803f8) |
 | 4 | World loaded multiple times in map selector | already fixed in baseline |
-| 7 | Optional runtime test coverage for assets | |
+| 7 | Optional runtime test coverage for assets | fixed |
 | 9 | Exported Normal Map wrong resolution (256x256) | fixed (3c48bb6) |
 | 10 | Vertex paint image mask broken | already fixed in baseline |
 | 16 | Viewport gizmo not updating properly | already fixed in baseline |

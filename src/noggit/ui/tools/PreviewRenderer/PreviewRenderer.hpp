@@ -39,6 +39,10 @@ class PreviewRenderer : public Noggit::Ui::Tools::ViewportManager::Viewport
     void setModelOffscreen(std::string const& filename);
     virtual void setPrefab(std::string const& filename) {};
 
+    // Issue #7: empty the rendered pixmap cache, used by the runtime asset test
+    // to bound the memory use when rendering thousands of assets.
+    void clearPixmapCache() { _cache.clear(); }
+
     void setLightDirection(float y, float z);
 
     BoolToggleProperty _draw_models = {true};
