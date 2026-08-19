@@ -2,6 +2,21 @@
 
 Working branch: `arena/01a018d4-noggitredb`
 
+Post-implementation verification pass (head `72f6685`): the sandbox has no
+toolchain for a full build (Qt5/nmake unavailable), so every change was
+re-reviewed statically: brace/paren balance per file, declaration↔definition
+sweep for all new header members, Qt API usage re-read file by file
+(AssetTestDialog, SafeLocsEditor, LogConsoleWidget, object palette,
+creation dialogs), render-pipeline arg-order/state-init checks
+(ModelRender filter overloads, WorldRender late blended pass, liquid
+shader uniforms against the terrain shader), and cross-reference of every
+touchpoint (`FileKey` implicit conversion, uniform block layout, qrc alias
+↔ disk file naming for shader hot reload, AUTOMOC coverage for the new
+`Q_OBJECT` classes). `blizzard-database-library` was additionally
+syntax-checked with `g++ -fsyntax-only -std=c++20` (project builds as
+C++20). The issues table below is complete; remaining limitations are
+documented per issue.
+
 ## All 41 open issues (GitLab prophecy-rp/noggit-red)
 
 | # | Title | Status |
