@@ -4,6 +4,7 @@
 #define NOGGIT_MODELRENDER_HPP
 
 #include <noggit/rendering/BaseRender.hpp>
+#include <unordered_map>
 #include <noggit/ModelHeaders.h>
 #include <noggit/tool_enums.hpp>
 #include <opengl/scoped.hpp>

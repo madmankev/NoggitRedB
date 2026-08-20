@@ -10,6 +10,7 @@
 #include <string>
 #include <typeinfo>
 #include <variant>
+#include <algorithm>
 #include <vector>
 
 
