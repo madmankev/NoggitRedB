@@ -5,7 +5,6 @@ echo "=========================================="
 echo "NoggitRedB Build Script"
 echo "==========================================" 
 
-# Detect OS
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     echo "Detected Linux"
     echo "Installing dependencies..."
@@ -13,16 +12,31 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     sudo apt-get install -y \
         build-essential \
         cmake \
+        git \
         freeglut3-dev \
-        libboost-all-dev \
-        qt5-default \
-        libstorm-dev \
-        git
+        libgl1-mesa-dev \
+        libboost-all-dev
+
+    # Qt 5: 'qt5-default' was removed from Debian 11 / Ubuntu 20.04 onwards,
+    # install the dev metapackages directly instead.
+    if ! sudo apt-get install -y qt5-default 2>/dev/null; then
+        sudo apt-get install -y \
+            qtbase5-dev \
+            qtbase5-dev-tools \
+            qttools5-dev
+    fi
+
+    # libstorm-dev is not packaged on all distributions; CMake vendors its
+    # own fallback, so a missing system package must not abort the script.
+    sudo apt-get install -y libstorm-dev || \
+        echo "warning: libstorm-dev unavailable, using the vendored StormLib"
 
 elif [[ "$OSTYPE" == "darwin"* ]]; then
     echo "Detected macOS"
     echo "Installing dependencies via Homebrew..."
     brew install cmake qt@5 boost
+    # Qt 5 is keg-only on Homebrew:
+    export CMAKE_PREFIX_PATH="$(brew --prefix qt@5):${CMAKE_PREFIX_PATH}"
 fi
 
 echo ""
