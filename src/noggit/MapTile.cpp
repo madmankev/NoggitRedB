@@ -191,6 +191,13 @@ void MapTile::waitForChildrenLoaded()
   {
     for (int j = 0; j < 16; ++j)
     {
+      // 9.1.5x: empty fallback chunks of corrupt modern tiles have no texture
+      // set (see MapTile::finishLoadingModern).
+      if (!mChunks[i][j]->texture_set)
+      {
+        continue;
+      }
+
       for (int k = 0; k < mChunks[i][j].get()->texture_set->num(); ++k)
       {
         (*mChunks[i][j].get()->texture_set->getTextures())[k].get()->wait_until_loaded();

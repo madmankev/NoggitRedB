@@ -159,7 +159,9 @@ void TileRender::draw (OpenGL::Scoped::use_program& mcnk_shader
 
       unsigned flags = chunk->getUpdateFlags();
 
-      if (!skip_upload_alphamap && (flags & ChunkUpdateFlags::ALPHAMAP || _requires_sampler_reset || _texture_not_loaded))
+      // 9.1.5x: empty fallback chunks of corrupt modern tiles have no texture
+      // set (see MapTile::finishLoadingModern), there is nothing to upload.
+      if (!skip_upload_alphamap && chunk->texture_set && (flags & ChunkUpdateFlags::ALPHAMAP || _requires_sampler_reset || _texture_not_loaded))
       {
         gl.activeTexture(GL_TEXTURE0 + 3);
         gl.bindTexture(GL_TEXTURE_2D_ARRAY, _alphamap_tex);
@@ -234,14 +236,18 @@ void TileRender::draw (OpenGL::Scoped::use_program& mcnk_shader
       {
         _chunk_instance_data[i].ChunkHoles_DrawImpass_TexLayerCount_CantPaint[1] = chunk->header_flags.flags.impass;
 
-        for (int k = 0; k < chunk->texture_set->num(); ++k)
+        // 9.1.5x: chunks without a texture set (corrupt modern tiles) have no layer flags.
+        if (chunk->texture_set)
         {
-          unsigned layer_flags = chunk->texture_set->flag(k);
-          auto flag_view = reinterpret_cast<MCLYFlags*>(&layer_flags);
+          for (int k = 0; k < chunk->texture_set->num(); ++k)
+          {
+            unsigned layer_flags = chunk->texture_set->flag(k);
+            auto flag_view = reinterpret_cast<MCLYFlags*>(&layer_flags);
 
-          _chunk_instance_data[i].ChunkTexDoAnim[k] = flag_view->animation_enabled;
-          _chunk_instance_data[i].ChunkTexAnimSpeed[k] = flag_view->animation_speed;
-          _chunk_instance_data[i].ChunkTexAnimDir[k] = flag_view->animation_rotation;
+            _chunk_instance_data[i].ChunkTexDoAnim[k] = flag_view->animation_enabled;
+            _chunk_instance_data[i].ChunkTexAnimSpeed[k] = flag_view->animation_speed;
+            _chunk_instance_data[i].ChunkTexAnimDir[k] = flag_view->animation_rotation;
+          }
         }
 
         _chunk_instance_data[i].ChunkTexDoAnim[1] = chunk->header_flags.flags.impass;
@@ -532,8 +538,6 @@ bool TileRender::fillSamplers(MapChunk* chunk, unsigned chunk_index,  unsigned d
 {
   MapTileDrawCall& draw_call = _draw_calls[draw_call_index];
 
-  _chunk_instance_data[chunk_index].ChunkHoles_DrawImpass_TexLayerCount_CantPaint[2] = static_cast<int>(chunk->texture_set->num());
-
   static constexpr unsigned NUM_SAMPLERS = 11;
 
   for (int i = 0; i < 4; i++)
@@ -548,6 +552,15 @@ bool TileRender::fillSamplers(MapChunk* chunk, unsigned chunk_index,  unsigned d
       _chunk_instance_data[chunk_index].ChunkTextureHeightOffset[i] = 1.0f;
   }
 
+  // 9.1.5x: chunks without a texture set (empty fallback chunks of corrupt
+  // modern tiles, see MapTile::finishLoadingModern) render untextured.
+  if (!chunk->texture_set)
+  {
+    _chunk_instance_data[chunk_index].ChunkHoles_DrawImpass_TexLayerCount_CantPaint[2] = 0;
+    return true;
+  }
+
+  _chunk_instance_data[chunk_index].ChunkHoles_DrawImpass_TexLayerCount_CantPaint[2] = static_cast<int>(chunk->texture_set->num());
 
   auto& chunk_textures = (*chunk->texture_set->getTextures());
   bool modern_features = Noggit::Application::NoggitApplication::instance()->getConfiguration()->modern_features;
@@ -670,7 +683,8 @@ void TileRender::initChunkData(MapChunk* chunk)
 
   chunk_render_instance.ChunkHoles_DrawImpass_TexLayerCount_CantPaint[0] = chunk->holes;
   chunk_render_instance.ChunkHoles_DrawImpass_TexLayerCount_CantPaint[1] = chunk->header_flags.flags.impass;
-  chunk_render_instance.ChunkHoles_DrawImpass_TexLayerCount_CantPaint[2] = static_cast<int>(chunk->texture_set->num());
+  // 9.1.5x: empty fallback chunks of corrupt modern tiles have no texture set.
+  chunk_render_instance.ChunkHoles_DrawImpass_TexLayerCount_CantPaint[2] = static_cast<int>(chunk->texture_set ? chunk->texture_set->num() : 0);
   chunk_render_instance.ChunkHoles_DrawImpass_TexLayerCount_CantPaint[3] = 0;
   chunk_render_instance.AreaIDColor_Pad2_DrawSelection[0] = chunk->areaID;
   chunk_render_instance.AreaIDColor_Pad2_DrawSelection[3] = 0;
@@ -689,6 +703,12 @@ void TileRender::initChunkData(MapChunk* chunk)
 
 void TileRender::setChunkDetaildoodadsExclusionData(MapChunk* chunk)
 {
+  // 9.1.5x: chunks without a texture set (corrupt modern tiles) carry no doodad stencil.
+  if (!chunk->texture_set)
+  {
+    return;
+  }
+
   auto doodadExclusionMap = chunk->texture_set->getDoodadStencilBase();
 
   // pack it to int32s
