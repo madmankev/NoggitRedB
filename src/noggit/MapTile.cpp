@@ -1372,6 +1372,14 @@ void MapTile::saveTile(World* world)
   }
   */
 
+  // 9.1.5x (Shadowlands): modern tiles are written in the split-file format
+  // (root + _tex0 + _obj0) by a dedicated writer
+  if (isModernFormat())
+  {
+    saveModernADT(world);
+    return;
+  }
+
   QSettings settings;
   bool use_mclq = settings.value("use_mclq_liquids_export", false).toBool();
 
@@ -1778,6 +1786,728 @@ void MapTile::save(World* world, bool save_using_mclq_liquids)
   lObjectInstances.clear();
   lModelInstances.clear();
   lModels.clear();
+}
+
+void MapTile::saveModernTextureSidecar(std::vector<std::string> const& texture_paths
+  , std::vector<std::uint32_t> const& texture_fdids) const
+{
+  // 9.1.5x: writes the editor sidecar with the paths of the terrain textures
+  // whose FileDataID is 0 in MDID (custom patch textures the client cannot
+  // resolve on its own). Only called when at least one such texture exists.
+  QJsonArray textures;
+
+  for (size_t i = 0; i < texture_paths.size(); ++i)
+  {
+    textures.append(QString::fromStdString(texture_fdids[i] ? std::string() : texture_paths[i]));
+  }
+
+  QJsonObject root_object;
+  root_object.insert(QStringLiteral("textures"), textures);
+
+  QJsonDocument const document(root_object);
+  QByteArray const json = document.toJson(QJsonDocument::Indented);
+
+  auto* client_data = Noggit::Application::NoggitApplication::instance()->clientData();
+  std::string const sidecar_path = modern_adt_sibling_path(_file_key.filepath(), ".noggit-tex.json");
+
+  BlizzardArchive::ClientFile sidecar_file(BlizzardArchive::Listfile::FileKey(sidecar_path), client_data
+    , BlizzardArchive::ClientFile::NEW_FILE);
+  sidecar_file.setBuffer(std::vector<char>(json.begin(), json.end()));
+  sidecar_file.save();
+
+  Log << "Wrote the custom texture sidecar \"" << sidecar_path << "\"." << std::endl;
+}
+
+void MapTile::saveModernADT(World* world)
+{
+  // 9.1.5x (Shadowlands) modern split ADT writing, see docs/MODERN_ADT.md:
+  // the tile is written as <name>_<x>_<y>.adt (root) + _tex0.adt + _obj0.adt.
+
+  Log << "Saving modern split ADT \"" << _file_key.stringRepr() << "\"." << std::endl;
+
+  auto* client_data = Noggit::Application::NoggitApplication::instance()->clientData();
+  auto const* listfile = client_data->listfile();
+
+  std::string const root_path = _file_key.filepath();
+  std::string const tex_path = modern_adt_sibling_path(root_path, "_tex0.adt");
+  std::string const obj_path = modern_adt_sibling_path(root_path, "_obj0.adt");
+
+  int lID;
+  std::vector<WMOInstance*> lObjectInstances;
+  std::vector<ModelInstance*> lModelInstances;
+
+  // get every model on the tile
+  for (std::uint32_t const uid : uids)
+  {
+    auto model = world->get_model(uid);
+
+    if (!model)
+    {
+      // todo: save elsewhere if this happens ? it shouldn't but still
+      LogError << "Could not find model with uid=" << uid << " when saving " << _file_key.stringRepr() << std::endl;
+    }
+    else
+    {
+      if (model.value().index() == eEntry_Object)
+      {
+        auto which = std::get<selected_object_type>(model.value())->which();
+        if (which == eWMO)
+        {
+          lObjectInstances.emplace_back(static_cast<WMOInstance*>(std::get<selected_object_type>(model.value())));
+        }
+        else if (which == eMODEL)
+        {
+          lModelInstances.emplace_back(static_cast<ModelInstance*>(std::get<selected_object_type>(model.value())));
+        }
+      }
+    }
+  }
+
+  // the doodad size class pre-sort (WDT MPHD flag 0x8) has to happen before
+  // the MDDF table and the per-chunk MCRD references are written so their
+  // indices line up (both use the order of lModelInstances)
+  if (world->mapIndex.sort_models_by_size_class())
+  {
+    std::sort(lModelInstances.begin(), lModelInstances.end(), [](ModelInstance* m1, ModelInstance* m2)
+    {
+      return m1->size_cat > m2->size_cat;
+    });
+  }
+
+  // model/WMO name tables: stable order — the entries the file had first (in
+  // the original order, so indices referenced by preserved chunks stay valid),
+  // new entries appended. Models only known by their FileDataID have no
+  // table entry, their MDDF/MODF entry references the id directly instead.
+  std::vector<std::string> mmdx_paths;
+  std::vector<std::string> mwmo_paths;
+
+  {
+    std::map<std::string, bool> seen_mmdx;
+    std::map<std::string, bool> seen_mwmo;
+
+    for (auto const& path : _modern_mmdx_paths)
+    {
+      if (seen_mmdx.emplace(path, true).second)
+      {
+        mmdx_paths.push_back(path);
+      }
+    }
+
+    for (auto const& model : lModelInstances)
+    {
+      model->ensureExtents();
+
+      auto const& key = model->model->file_key();
+
+      if (key.hasFilepath() && seen_mmdx.emplace(key.filepath(), true).second)
+      {
+        mmdx_paths.push_back(key.filepath());
+      }
+    }
+
+    for (auto const& path : _modern_mwmo_paths)
+    {
+      if (seen_mwmo.emplace(path, true).second)
+      {
+        mwmo_paths.push_back(path);
+      }
+    }
+
+    for (auto const& object : lObjectInstances)
+    {
+      auto const& key = object->wmo->file_key();
+
+      if (key.hasFilepath() && seen_mwmo.emplace(key.filepath(), true).second)
+      {
+        mwmo_paths.push_back(key.filepath());
+      }
+    }
+  }
+
+  std::map<std::string, int> mmdx_index;
+  std::map<std::string, int> mwmo_index;
+
+  for (size_t i = 0; i < mmdx_paths.size(); ++i)
+  {
+    mmdx_index.emplace(mmdx_paths[i], static_cast<int>(i));
+  }
+
+  for (size_t i = 0; i < mwmo_paths.size(); ++i)
+  {
+    mwmo_index.emplace(mwmo_paths[i], static_cast<int>(i));
+  }
+
+  // Check which textures are on this ADT (the MDID table).
+  std::map<std::string, int> lTextures;
+
+  for (int i = 0; i < 16; ++i)
+  {
+    for (int j = 0; j < 16; ++j)
+    {
+      if (!mChunks[i][j]->texture_set)
+      {
+        continue;
+      }
+
+      for (size_t tex = 0; tex < mChunks[i][j]->texture_set->num(); tex++)
+      {
+        if (lTextures.find(mChunks[i][j]->texture_set->filename(tex)) == lTextures.end())
+        {
+          lTextures.emplace(mChunks[i][j]->texture_set->filename(tex), -1);
+        }
+      }
+    }
+  }
+
+  std::vector<std::string> texture_paths;
+  std::vector<std::uint32_t> texture_fdids;
+  bool has_custom_textures = false;
+
+  lID = 0;
+  for (auto& texture : lTextures)
+  {
+    texture.second = lID++;
+
+    texture_paths.push_back(texture.first);
+
+    std::uint32_t fdid = listfile->getFileDataID(texture.first);
+
+    if (!fdid)
+    {
+      // maybe one of our placeholder names carrying the id (unresolved by
+      // the listfile, e.g. a listfile older than the client build)
+      modern_fdid_from_placeholder(texture.first, fdid);
+    }
+
+    if (!fdid)
+    {
+      // truly custom texture: the client cannot resolve it, its path is
+      // persisted in the sidecar so the map stays editable in Noggit
+      has_custom_textures = true;
+    }
+
+    texture_fdids.push_back(fdid);
+  }
+
+  // - Now write the files. -----------------------------------
+
+  util::sExtendableArray lRootFile;
+  util::sExtendableArray lTexFile;
+  util::sExtendableArray lObjFile;
+
+  int lRootPosition = 0;
+  int lTexPosition = 0;
+  int lObjPosition = 0;
+
+  auto const write_mver = [](util::sExtendableArray& file, int& position)
+  {
+    file.Extend(8 + 0x4);
+    SetChunkHeader(file, position, 'MVER', 4);
+    *(file.GetPointer<int>(position + 8)) = 18;
+    position += 8 + 0x4;
+  };
+
+  write_mver(lRootFile, lRootPosition);
+  write_mver(lTexFile, lTexPosition);
+  write_mver(lObjFile, lObjPosition);
+
+  // ------------------------------------------------------------------
+  // root file
+  // ------------------------------------------------------------------
+
+  // MHDR (start from the loaded header so fields Noggit doesn't model, e.g.
+  // the mamp byte and the padding, survive, then reset every offset)
+  int lMHDR_Position = lRootPosition;
+
+  lRootFile.Extend(8 + 0x40);
+  SetChunkHeader(lRootFile, lRootPosition, 'MHDR', 0x40);
+  lRootPosition += 8 + 0x40;
+
+  {
+    auto const mhdr = lRootFile.GetPointer<MHDR>(lMHDR_Position + 8);
+
+    *mhdr = _original_mhdr;
+
+    mhdr->flags = mFlags;
+    mhdr->mcin = 0;
+    mhdr->mtex = 0;
+    mhdr->mmdx = 0;
+    mhdr->mmid = 0;
+    mhdr->mwmo = 0;
+    mhdr->mwid = 0;
+    mhdr->mddf = 0;
+    mhdr->modf = 0;
+    mhdr->mfbo = 0;
+    mhdr->mh2o = 0;
+    mhdr->mtxf = 0;
+  }
+
+  // MFBO
+  if (mFlags & 1)
+  {
+    size_t chunkSize = sizeof(int16_t) * 9 * 2;
+    lRootFile.Extend(static_cast<long>(8 + chunkSize));
+    SetChunkHeader(lRootFile, lRootPosition, 'MFBO', static_cast<int>(chunkSize));
+    lRootFile.GetPointer<MHDR>(lMHDR_Position + 8)->mfbo = lRootPosition - 0x14;
+
+    auto const lMFBO_Data = lRootFile.GetPointer<int16_t>(lRootPosition + 8);
+
+    lID = 0;
+
+    for (int i = 0; i < 9; ++i)
+      lMFBO_Data[lID++] = (int16_t)mMaximumValues[i].y;
+
+    for (int i = 0; i < 9; ++i)
+      lMFBO_Data[lID++] = (int16_t)mMinimumValues[i].y;
+
+    lRootPosition += static_cast<int>(8 + chunkSize);
+  }
+
+  // MH2O (only when the tile has liquids, the writer no-ops otherwise)
+  Water.saveToFile(lRootFile, lMHDR_Position, lRootPosition);
+
+  // preserved unknown tile level chunks (blend meshes MBMH/MBBB/MBNV/MBMI, ...)
+  for (auto const& chunk : _preserved_root_chunks)
+  {
+    lRootFile.Extend(static_cast<unsigned long>(8 + chunk.data.size()));
+    SetChunkHeader(lRootFile, lRootPosition, static_cast<int>(chunk.fourcc), static_cast<int>(chunk.data.size()));
+
+    if (!chunk.data.empty())
+    {
+      memcpy(lRootFile.GetPointer<char>(lRootPosition + 8).get(), chunk.data.data(), chunk.data.size());
+    }
+
+    lRootPosition += static_cast<int>(8 + chunk.data.size());
+  }
+
+  // ------------------------------------------------------------------
+  // tex file: texture table (MDID) and the aligned metadata arrays
+  // ------------------------------------------------------------------
+
+  // MDID: diffuse terrain texture FileDataIDs
+  {
+    int const mdid_size = static_cast<int>(4 * texture_fdids.size());
+
+    lTexFile.Extend(8 + mdid_size);
+    SetChunkHeader(lTexFile, lTexPosition, 'MDID', mdid_size);
+
+    auto const mdid_data = lTexFile.GetPointer<std::uint32_t>(lTexPosition + 8);
+
+    for (size_t i = 0; i < texture_fdids.size(); ++i)
+    {
+      mdid_data[i] = texture_fdids[i];
+    }
+
+    lTexPosition += 8 + mdid_size;
+  }
+
+  auto const meta_of = [this](std::string const& path) -> ModernTextureMeta const*
+  {
+    auto const it = _modern_tex_meta.find(path);
+    return it == _modern_tex_meta.end() ? nullptr : &it->second;
+  };
+
+  // MHID: height texture FileDataIDs, aligned to MDID (only when present)
+  {
+    bool any_height = false;
+
+    for (auto const& path : texture_paths)
+    {
+      auto const* meta = meta_of(path);
+      any_height |= meta && meta->has_height;
+    }
+
+    if (any_height)
+    {
+      int const mhid_size = static_cast<int>(4 * texture_paths.size());
+
+      lTexFile.Extend(8 + mhid_size);
+      SetChunkHeader(lTexFile, lTexPosition, 'MHID', mhid_size);
+
+      auto const mhid_data = lTexFile.GetPointer<std::uint32_t>(lTexPosition + 8);
+
+      for (size_t i = 0; i < texture_paths.size(); ++i)
+      {
+        auto const* meta = meta_of(texture_paths[i]);
+        mhid_data[i] = (meta && meta->has_height) ? meta->height_fdid : 0;
+      }
+
+      lTexPosition += 8 + mhid_size;
+    }
+  }
+
+  // MTXF: per texture flags, aligned to MDID (only when present)
+  {
+    bool any_mtxf = false;
+
+    for (auto const& path : texture_paths)
+    {
+      auto const* meta = meta_of(path);
+      any_mtxf |= meta && meta->has_mtxf;
+    }
+
+    if (any_mtxf)
+    {
+      int const mtxf_size = static_cast<int>(sizeof(mtxf_entry) * texture_paths.size());
+
+      lTexFile.Extend(8 + mtxf_size);
+      SetChunkHeader(lTexFile, lTexPosition, 'MTXF', mtxf_size);
+
+      auto const mtxf_data = lTexFile.GetPointer<mtxf_entry>(lTexPosition + 8);
+
+      for (size_t i = 0; i < texture_paths.size(); ++i)
+      {
+        auto const* meta = meta_of(texture_paths[i]);
+        mtxf_data[i] = (meta && meta->has_mtxf) ? meta->mtxf : mtxf_entry{};
+      }
+
+      lTexPosition += 8 + mtxf_size;
+    }
+  }
+
+  // MTXP: texture params, aligned to MDID (only when present)
+  {
+    bool any_mtxp = false;
+
+    for (auto const& path : texture_paths)
+    {
+      auto const* meta = meta_of(path);
+      any_mtxp |= meta && meta->has_mtxp;
+    }
+
+    if (any_mtxp)
+    {
+      int const mtxp_size = static_cast<int>(16 * texture_paths.size());
+
+      lTexFile.Extend(8 + mtxp_size);
+      SetChunkHeader(lTexFile, lTexPosition, 'MTXP', mtxp_size);
+
+      auto const mtxp_data = lTexFile.GetPointer<std::uint32_t>(lTexPosition + 8);
+
+      for (size_t i = 0; i < texture_paths.size(); ++i)
+      {
+        auto const* meta = meta_of(texture_paths[i]);
+
+        mtxp_data[i * 4 + 0] = (meta && meta->has_mtxp) ? meta->mtxp_flags : 0;
+
+        float const height_scale = (meta && meta->has_mtxp) ? meta->mtxp_height_scale : 0.0f;
+        float const height_offset = (meta && meta->has_mtxp) ? meta->mtxp_height_offset : 1.0f;
+
+        memcpy(&mtxp_data[i * 4 + 1], &height_scale, 4);
+        memcpy(&mtxp_data[i * 4 + 2], &height_offset, 4);
+        mtxp_data[i * 4 + 3] = 0;
+      }
+
+      lTexPosition += 8 + mtxp_size;
+    }
+  }
+
+  // MTCG: color grading info, aligned to MDID (only when present)
+  {
+    bool any_mtcg = false;
+
+    for (auto const& path : texture_paths)
+    {
+      auto const* meta = meta_of(path);
+      any_mtcg |= meta && meta->has_mtcg;
+    }
+
+    if (any_mtcg)
+    {
+      int const mtcg_size = static_cast<int>(16 * texture_paths.size());
+
+      lTexFile.Extend(8 + mtcg_size);
+      SetChunkHeader(lTexFile, lTexPosition, 'MTCG', mtcg_size);
+
+      auto const mtcg_data = lTexFile.GetPointer<std::uint32_t>(lTexPosition + 8);
+
+      for (size_t i = 0; i < texture_paths.size(); ++i)
+      {
+        auto const* meta = meta_of(texture_paths[i]);
+
+        for (int j = 0; j < 4; ++j)
+        {
+          mtcg_data[i * 4 + j] = (meta && meta->has_mtcg) ? meta->mtcg[j] : 0;
+        }
+      }
+
+      lTexPosition += 8 + mtcg_size;
+    }
+  }
+
+  // MAMP: texture scale override byte (only when the file had one)
+  if (_modern_mamp_present)
+  {
+    lTexFile.Extend(8 + 1);
+    SetChunkHeader(lTexFile, lTexPosition, 'MAMP', 1);
+    *lTexFile.GetPointer<char>(lTexPosition + 8) = static_cast<char>(_modern_mamp);
+    lTexPosition += 8 + 1;
+  }
+
+  // ------------------------------------------------------------------
+  // obj file: name tables and model placements
+  // ------------------------------------------------------------------
+
+  // MMDX
+  {
+    int const mmdx_position = lObjPosition;
+
+    lObjFile.Extend(8 + 0);  // We don't yet know how big this will be.
+    SetChunkHeader(lObjFile, lObjPosition, 'MMDX');
+    lObjPosition += 8;
+
+    for (auto const& path : mmdx_paths)
+    {
+      std::string const normalized = misc::normalize_adt_filename(path);
+
+      lObjFile.Insert(lObjPosition, static_cast<unsigned long>(normalized.size() + 1), normalized.c_str());
+      lObjPosition += static_cast<int>(normalized.size() + 1);
+      lObjFile.GetPointer<sChunkHeader>(mmdx_position)->mSize += static_cast<int>(normalized.size() + 1);
+    }
+  }
+
+  // MMID: FileDataIDs aligned to the MMDX table (0 = unresolved)
+  {
+    int const mmid_size = static_cast<int>(4 * mmdx_paths.size());
+
+    lObjFile.Extend(8 + mmid_size);
+    SetChunkHeader(lObjFile, lObjPosition, 'MMID', mmid_size);
+
+    auto const mmid_data = lObjFile.GetPointer<std::uint32_t>(lObjPosition + 8);
+
+    for (size_t i = 0; i < mmdx_paths.size(); ++i)
+    {
+      mmid_data[i] = listfile->getFileDataID(mmdx_paths[i]);
+    }
+
+    lObjPosition += 8 + mmid_size;
+  }
+
+  // MWMO
+  {
+    int const mwmo_position = lObjPosition;
+
+    lObjFile.Extend(8 + 0);  // We don't yet know how big this will be.
+    SetChunkHeader(lObjFile, lObjPosition, 'MWMO');
+    lObjPosition += 8;
+
+    for (auto const& path : mwmo_paths)
+    {
+      std::string const normalized = misc::normalize_adt_filename(path);
+
+      lObjFile.Insert(lObjPosition, static_cast<unsigned long>(normalized.size() + 1), normalized.c_str());
+      lObjPosition += static_cast<int>(normalized.size() + 1);
+      lObjFile.GetPointer<sChunkHeader>(mwmo_position)->mSize += static_cast<int>(normalized.size() + 1);
+    }
+  }
+
+  // MWID: FileDataIDs aligned to the MWMO table (0 = unresolved)
+  {
+    int const mwid_size = static_cast<int>(4 * mwmo_paths.size());
+
+    lObjFile.Extend(8 + mwid_size);
+    SetChunkHeader(lObjFile, lObjPosition, 'MWID', mwid_size);
+
+    auto const mwid_data = lObjFile.GetPointer<std::uint32_t>(lObjPosition + 8);
+
+    for (size_t i = 0; i < mwmo_paths.size(); ++i)
+    {
+      mwid_data[i] = listfile->getFileDataID(mwmo_paths[i]);
+    }
+
+    lObjPosition += 8 + mwid_size;
+  }
+
+  // MDDF (lModelInstances was size class sorted above when the WDT says so)
+  {
+    int const mddf_size = static_cast<int>(0x24 * lModelInstances.size());
+
+    lObjFile.Extend(8 + mddf_size);
+    SetChunkHeader(lObjFile, lObjPosition, 'MDDF', mddf_size);
+
+    auto const mddf_data = lObjFile.GetPointer<ENTRY_MDDF>(lObjPosition + 8);
+
+    lObjPosition += 8 + mddf_size;
+
+    lID = 0;
+    for (auto const& model : lModelInstances)
+    {
+      auto const& key = model->model->file_key();
+
+      mddf_data[lID].uniqueID = model->uid;
+      mddf_data[lID].pos[0] = model->pos.x;
+      mddf_data[lID].pos[1] = model->pos.y;
+      mddf_data[lID].pos[2] = model->pos.z;
+      mddf_data[lID].rot[0] = model->dir.x;
+      mddf_data[lID].rot[1] = model->dir.y;
+      mddf_data[lID].rot[2] = model->dir.z;
+      mddf_data[lID].scale = (uint16_t)(model->scale * 1024);
+      mddf_data[lID].flags = model->mddf_flags;
+
+      if (key.hasFilepath())
+      {
+        auto const index_it = mmdx_index.find(key.filepath());
+
+        if (index_it == mmdx_index.end())
+        {
+          // can only happen when a model appeared between the table build and
+          // this write; fall back to the first table entry
+          LogError << "MapTile::saveModernADT: model \"" << key.filepath()
+                   << "\" missing from the MMDX table, using index 0 instead" << std::endl;
+          mddf_data[lID].nameID = 0;
+        }
+        else
+        {
+          mddf_data[lID].nameID = static_cast<uint32_t>(index_it->second);
+        }
+      }
+      else
+      {
+        // models only known by their FileDataID are stored directly, flagged
+        mddf_data[lID].nameID = key.fileDataID();
+        mddf_data[lID].flags |= 0x40;
+      }
+
+      lID++;
+    }
+
+    LogDebug << "Added " << lID << " doodads to MDDF" << std::endl;
+  }
+
+  // MODF
+  {
+    int const modf_size = static_cast<int>(0x40 * lObjectInstances.size());
+
+    lObjFile.Extend(8 + modf_size);
+    SetChunkHeader(lObjFile, lObjPosition, 'MODF', modf_size);
+
+    auto const modf_data = lObjFile.GetPointer<ENTRY_MODF>(lObjPosition + 8);
+
+    lObjPosition += 8 + modf_size;
+
+    lID = 0;
+    for (auto const& object : lObjectInstances)
+    {
+      auto const& key = object->wmo->file_key();
+
+      modf_data[lID].uniqueID = object->uid;
+      modf_data[lID].pos[0] = object->pos.x;
+      modf_data[lID].pos[1] = object->pos.y;
+      modf_data[lID].pos[2] = object->pos.z;
+
+      modf_data[lID].rot[0] = object->dir.x;
+      modf_data[lID].rot[1] = object->dir.y;
+      modf_data[lID].rot[2] = object->dir.z;
+
+      modf_data[lID].extents[0][0] = object->getExtents()[0].x;
+      modf_data[lID].extents[0][1] = object->getExtents()[0].y;
+      modf_data[lID].extents[0][2] = object->getExtents()[0].z;
+
+      modf_data[lID].extents[1][0] = object->getExtents()[1].x;
+      modf_data[lID].extents[1][1] = object->getExtents()[1].y;
+      modf_data[lID].extents[1][2] = object->getExtents()[1].z;
+
+      std::uint16_t flags = static_cast<std::uint16_t>(object->mFlags & ~0x8);
+
+      if (key.hasFilepath())
+      {
+        auto const index_it = mwmo_index.find(key.filepath());
+
+        if (index_it == mwmo_index.end())
+        {
+          LogError << "MapTile::saveModernADT: WMO \"" << key.filepath()
+                   << "\" missing from the MWMO table, using index 0 instead" << std::endl;
+          modf_data[lID].nameID = 0;
+        }
+        else
+        {
+          modf_data[lID].nameID = static_cast<uint32_t>(index_it->second);
+        }
+      }
+      else
+      {
+        // WMOs only known by their FileDataID are stored directly, flagged
+        modf_data[lID].nameID = key.fileDataID();
+        flags |= 0x8;
+      }
+
+      // the scale is always written, so the per-entry scale flag is always set
+      flags |= 0x4;
+
+      modf_data[lID].flags = flags;
+      modf_data[lID].doodadSet = object->doodadset();
+      modf_data[lID].nameSet = object->mNameset;
+      modf_data[lID].scale = (uint16_t)(object->scale * 1024);
+
+      lID++;
+    }
+
+    LogDebug << "Added " << lID << " wmos to MODF" << std::endl;
+  }
+
+  // preserved unknown object level chunks (MWDR/MWDS WMO doodad sets, ...)
+  for (auto const& chunk : _preserved_obj_chunks)
+  {
+    lObjFile.Extend(static_cast<unsigned long>(8 + chunk.data.size()));
+    SetChunkHeader(lObjFile, lObjPosition, static_cast<int>(chunk.fourcc), static_cast<int>(chunk.data.size()));
+
+    if (!chunk.data.empty())
+    {
+      memcpy(lObjFile.GetPointer<char>(lObjPosition + 8).get(), chunk.data.data(), chunk.data.size());
+    }
+
+    lObjPosition += static_cast<int>(8 + chunk.data.size());
+  }
+
+  // ------------------------------------------------------------------
+  // the chunk data of all three files
+  // ------------------------------------------------------------------
+
+  for (int y = 0; y < 16; ++y)
+  {
+    for (int x = 0; x < 16; ++x)
+    {
+      mChunks[y][x]->saveModern(lRootFile, lRootPosition
+                                , lTexFile, lTexPosition
+                                , lObjFile, lObjPosition
+                                , lTextures, lObjectInstances, lModelInstances);
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // write everything to disk
+  // ------------------------------------------------------------------
+
+  {
+    BlizzardArchive::ClientFile f(BlizzardArchive::Listfile::FileKey(root_path), client_data
+      , BlizzardArchive::ClientFile::NEW_FILE);
+    f.setBuffer(lRootFile.data_up_to(lRootPosition));
+    f.save();
+  }
+
+  {
+    BlizzardArchive::ClientFile f(BlizzardArchive::Listfile::FileKey(tex_path), client_data
+      , BlizzardArchive::ClientFile::NEW_FILE);
+    f.setBuffer(lTexFile.data_up_to(lTexPosition));
+    f.save();
+  }
+
+  {
+    BlizzardArchive::ClientFile f(BlizzardArchive::Listfile::FileKey(obj_path), client_data
+      , BlizzardArchive::ClientFile::NEW_FILE);
+    f.setBuffer(lObjFile.data_up_to(lObjPosition));
+    f.save();
+  }
+
+  // paths of the custom (FileDataID 0) terrain textures, so the tile stays
+  // editable in Noggit
+  if (has_custom_textures)
+  {
+    saveModernTextureSidecar(texture_paths, texture_fdids);
+  }
+
+  lObjectInstances.clear();
+  lModelInstances.clear();
 }
 
 

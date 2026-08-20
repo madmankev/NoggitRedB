@@ -4410,25 +4410,6 @@ void MapView::mouseReleaseEvent (QMouseEvent* event)
 
 void MapView::save(save_mode mode)
 {
-  // 9.1.5x: writing the modern (split/LOD) ADT format is not implemented, so
-  // saving a Shadowlands project would only produce corrupt, unreadable ADTs.
-  // Block it with a clear message instead of destroying the user's map data.
-  if (Noggit::Project::CurrentProject::get()->projectVersion
-      == Noggit::Project::ProjectVersion::SL)
-  {
-    QMessageBox::critical
-      (nullptr
-      , "Saving not supported"
-      , "This project targets a modern (Shadowlands / 9.1.5x) client.\n\n"
-        "Reading modern client data works, but writing map tiles in the modern "
-        "split-ADT format is not implemented yet. Saving now would corrupt your "
-        "map data, so it has been disabled.\n\n"
-        "Use a Wrath of the Lich King (3.3.5a) project for map editing, you can "
-        "upconvert the finished map afterwards."
-      );
-    return;
-  }
-
   bool save = true;
 
   activeTool()->saveSettings();

@@ -2376,6 +2376,8 @@ void MapChunk::saveModern(util::sExtendableArray& root_file
   auto const root_header = root_file.GetPointer<MapChunkHeader>(root_position + 8);
 
   root_header->flags = header_flags;
+  // keep the flags in sync with the chunks actually written below
+  root_header->flags.flags.has_mccv = hasMCCV ? 1 : 0;
   root_header->ix = px;
   root_header->iy = py;
   root_header->zpos = zbase * -1.0f + ZEROPOINT;
@@ -2397,8 +2399,9 @@ void MapChunk::saveModern(util::sExtendableArray& root_file
   root_header->sizeShadow = 0;
   root_header->ofsSndEmitters = 0;
   root_header->nSndEmitters = 0;
+  // no MCLQ in modern files, liquids live in MH2O of the root file
   root_header->ofsLiquid = 0;
-  root_header->sizeLiquid = 8;
+  root_header->sizeLiquid = 0;
   root_header->ofsMCCV = 0;
 
   if (texture_set)
