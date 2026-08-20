@@ -21,6 +21,9 @@
 #include <util/sExtendableArray.hpp>
 
 #include <algorithm>
+#include <list>
+#include <cstring>
+#include <string>
 #include <cstdint>
 #include <cmath>
 #include <limits>

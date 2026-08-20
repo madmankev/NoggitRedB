@@ -22,15 +22,24 @@ What works on 9.1.5x projects:
   priority for overriding.
 * Game database tables in the modern DB2/WDC3 format (`DBFilesClient\*`),
   including the Map table that drives the map list.
-* Loading and inspecting 3.3.5a-format map tiles with all editor
-  tooling, and every client-agnostic tool (palettes, asset browser,
-  DB editors, texture painter, etc.).
+* Opening, editing and saving map tiles in the modern split-ADT format
+  (root `.adt` + `_tex0.adt` + `_obj0.adt`): terrain, textures, alphamaps,
+  shadows, liquids, flight bounds and model placements all read and write.
+  Terrain textures and models are resolved through FileDataIDs, custom
+  textures round-trip through a small JSON sidecar per tile, and unknown
+  chunks (blend meshes, terrain materials, WMO doodad sets, ...) are
+  preserved verbatim. See `docs/MODERN_ADT.md` for details.
 
-Not (yet) implemented for 9.1.5x:
+Keep in mind for 9.1.5x:
 
-* Opening or saving map tiles in the modern split-ADT format. **Saving
-  is disabled on Shadowlands projects** so no map data can be corrupted.
-  Edit maps in a 3.3.5a project and upconvert the result instead.
+* The far-view LOD files (`_lod.adt`, `_obj1.adt`) are not regenerated
+  after editing — run an external LOD regeneration pass (WoWDev wiki:
+  "ADTLodImplementation") or delete the stale siblings alongside the tile.
+* High-resolution (8x8) terrain holes are folded down to the classic 4x4
+  editor resolution on load (saved back as 4x4).
+* Custom models/textures that only exist as loose files render and edit
+  fine in Noggit, but the modern client loads by FileDataID — such assets
+  must exist in the client's storage to show up in game.
 
 # LICENSE #
 This software is open source software licensed under GPL3, as found in
