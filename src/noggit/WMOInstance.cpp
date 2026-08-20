@@ -33,7 +33,9 @@ WMOInstance::WMOInstance(BlizzardArchive::Listfile::FileKey const& file_key, ENT
 
   bool modern_features = Noggit::Application::NoggitApplication::instance()->getConfiguration()->modern_features;
 
-  if (modern_features)
+  // 9.1.5x: the scale is per-entry in modern files, flagged with
+  // modf_flag_has_scale (0x4) instead of being a client build setting
+  if (modern_features || (d->flags & 0x4))
   {
       scale = static_cast<float>(d->scale) / 1024.0f;
   }

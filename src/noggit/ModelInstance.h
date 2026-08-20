@@ -43,6 +43,10 @@ public:
   // longest side of an AABB transformed model's bounding box from the M2 header
   float size_cat = 0.0f;
 
+  // 9.1.5x: MDDF flags the instance was loaded with (without the
+  // filedata-id marker bit, which is recomputed on save)
+  std::uint16_t mddf_flags = 0;
+
   explicit ModelInstance(BlizzardArchive::Listfile::FileKey const& file_key
                          , Noggit::NoggitRenderContext context);
 

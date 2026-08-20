@@ -23,13 +23,101 @@
 #include <util/sExtendableArray.hpp>
 
 #include <QtCore/QSettings>
+#include <QtCore/QByteArray>
+#include <QtCore/QJsonArray>
+#include <QtCore/QJsonDocument>
+#include <QtCore/QJsonObject>
 
+#include <algorithm>
 #include <cassert>
+#include <cctype>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace
+{
+  // 9.1.5x: path of a sibling file of a split ADT ("_tex0.adt", "_obj0.adt",
+  // or the ".noggit-tex.json" editor sidecar)
+  std::string modern_adt_sibling_path(std::string const& root_path, std::string const& ending)
+  {
+    std::string base = root_path;
+
+    if (base.size() >= 4)
+    {
+      std::string extension = base.substr(base.size() - 4);
+
+      for (auto& character : extension)
+      {
+        character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+      }
+
+      if (extension == ".adt")
+      {
+        base.resize(base.size() - 4);
+      }
+    }
+
+    return base + ending;
+  }
+
+  // stable placeholder name for terrain textures whose FileDataID could not
+  // be resolved through the listfile; the id is recovered from the name again
+  // on save (kept under "tileset/" so the terrain texture logic applies to it)
+  std::string modern_fdid_placeholder_name(std::uint32_t fdid)
+  {
+    return "tileset/fdid_" + std::to_string(fdid) + ".blp";
+  }
+
+  // inverse of modern_fdid_placeholder_name
+  bool modern_fdid_from_placeholder(std::string const& path, std::uint32_t& out_fdid)
+  {
+    std::string lower = path;
+
+    for (auto& character : lower)
+    {
+      character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
+    }
+
+    std::replace(lower.begin(), lower.end(), '\\', '/');
+
+    if (lower.rfind("tileset/fdid_", 0) != 0)
+    {
+      return false;
+    }
+
+    std::string digits;
+
+    for (size_t i = 13; i < lower.size() && lower[i] != '.'; ++i)
+    {
+      if (!std::isdigit(static_cast<unsigned char>(lower[i])))
+      {
+        return false;
+      }
+
+      digits += lower[i];
+    }
+
+    if (digits.empty())
+    {
+      return false;
+    }
+
+    try
+    {
+      out_fdid = static_cast<std::uint32_t>(std::stoul(digits));
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    return true;
+  }
+}
 
 
 MapTile::MapTile( int pX
@@ -158,6 +246,15 @@ void MapTile::finishLoading()
   theFile.read(&Header, sizeof(MHDR));
 
   mFlags = Header.flags;
+
+  // 9.1.5x (Shadowlands): modern tiles use the split-file format (root +
+  // _tex0 + _obj0) which has no MCIN offset table, they are parsed by a
+  // dedicated reader
+  if (isModernFormat())
+  {
+    finishLoadingModern(theFile);
+    return;
+  }
 
   // - MCIN ----------------------------------------------
 
@@ -375,7 +472,9 @@ void MapTile::finishLoading()
     unsigned x = nextChunk / 16;
     unsigned z = nextChunk % 16;
 
-    mChunks[x][z] = std::make_unique<MapChunk> (this, &theFile, mBigAlpha, _mode, _context, false, 0, _load_textures);
+    // Fix: pass the actual index of the chunk in the file (used by the issue
+    // #47 stored-coordinate validation, 0 scrambled every chunk but the first)
+    mChunks[x][z] = std::make_unique<MapChunk> (this, &theFile, mBigAlpha, _mode, _context, false, nextChunk, _load_textures);
 
     auto& chunk = mChunks[x][z];
 
@@ -389,6 +488,717 @@ void MapTile::finishLoading()
   theFile.close();
 
   // - Really done. --------------------------------------
+
+  LogDebug << "Done loading tile " << index.x << "," << index.z << "." << std::endl;
+  finished = true;
+  _tile_is_being_reloaded = false;
+  _state_changed.notify_all();
+}
+
+bool MapTile::isModernFormat() const
+{
+  // 9.1.5x (Shadowlands): modern client projects use the split ADT format
+  return Noggit::Project::CurrentProject::get()->projectVersion
+         == Noggit::Project::ProjectVersion::SL;
+}
+
+void MapTile::loadModernTextureSidecar()
+{
+  // 9.1.5x: reads the editor sidecar ("<tile>.noggit-tex.json" next to the
+  // root .adt) holding the paths of the terrain textures whose FileDataID is
+  // 0 in MDID (custom patch textures the client cannot resolve on its own)
+  _modern_custom_texture_paths.clear();
+
+  auto* client_data = Noggit::Application::NoggitApplication::instance()->clientData();
+  std::string const sidecar_path = modern_adt_sibling_path(_file_key.filepath(), ".noggit-tex.json");
+
+  try
+  {
+    BlizzardArchive::ClientFile sidecar_file(BlizzardArchive::Listfile::FileKey(sidecar_path), client_data);
+
+    QJsonDocument const document
+      = QJsonDocument::fromJson(QByteArray(sidecar_file.getBuffer(), static_cast<int>(sidecar_file.getSize())));
+
+    if (!document.isObject())
+    {
+      return;
+    }
+
+    QJsonArray const textures = document.object().value(QStringLiteral("textures")).toArray();
+
+    for (int i = 0; i < textures.size(); ++i)
+    {
+      QString const path = textures[i].toString();
+
+      if (!path.isEmpty())
+      {
+        _modern_custom_texture_paths[i] = path.toStdString();
+      }
+    }
+  }
+  catch (...)
+  {
+    // no or unreadable sidecar: tiles written by the supported pipeline or
+    // without custom textures simply don't have one
+  }
+}
+
+void MapTile::finishLoadingModern(BlizzardArchive::ClientFile& theFile)
+{
+  // 9.1.5x (Shadowlands) modern split ADT loading, see docs/MODERN_ADT.md.
+  //
+  // The tile data is spread over three files:
+  //  - <name>_<x>_<y>.adt      "root": MHDR, MFBO, MH2O (liquids) and the
+  //                            MCNKs holding the terrain geometry
+  //  - <name>_<x>_<y>_tex0.adt "tex":  MDID (terrain texture FileDataIDs) and
+  //                            header-less MCNKs with layers/alphamaps/shadows
+  //  - <name>_<x>_<y>_obj0.adt "obj":  MMDX/MWMO name tables, MDDF/MODF model
+  //                            placements and header-less MCNKs with MCRD/MCRW
+  //
+  // There is no MCIN offset table in modern files, the chunks are matched
+  // across the files by their index in the file (they're written in sequence).
+
+  auto* client_data = Noggit::Application::NoggitApplication::instance()->clientData();
+  auto const* listfile = client_data->listfile();
+
+  std::string const root_path = _file_key.filepath();
+
+  // - Open the sibling files (both are optional so the geometry at least loads)
+
+  std::unique_ptr<BlizzardArchive::ClientFile> tex_file;
+  std::unique_ptr<BlizzardArchive::ClientFile> obj_file;
+
+  try
+  {
+    tex_file = std::make_unique<BlizzardArchive::ClientFile>(
+      BlizzardArchive::Listfile::FileKey(modern_adt_sibling_path(root_path, "_tex0.adt")), client_data);
+  }
+  catch (...)
+  {
+    LogError << "Could not open the _tex0 file for tile " << index.x << ", " << index.z
+             << " (\"" << root_path << "\"), the tile's textures won't be available." << std::endl;
+  }
+
+  try
+  {
+    obj_file = std::make_unique<BlizzardArchive::ClientFile>(
+      BlizzardArchive::Listfile::FileKey(modern_adt_sibling_path(root_path, "_obj0.adt")), client_data);
+  }
+  catch (...)
+  {
+    LogError << "Could not open the _obj0 file for tile " << index.x << ", " << index.z
+             << " (\"" << root_path << "\"), the tile's models won't be available." << std::endl;
+  }
+
+  uint32_t fourcc;
+  uint32_t size;
+
+  std::vector<size_t> root_chunk_offsets;
+  std::vector<size_t> tex_chunk_offsets;
+
+  std::vector<std::string> mdid_paths; // terrain texture paths aligned to _modern_mdids
+
+  std::vector<std::string> mModelFilenames; // MMDX order
+  std::vector<std::string> mWMOFilenames;   // MWMO order
+  std::vector<std::uint32_t> mmid_fdids;    // MMID order (aligned to MMDX)
+  std::vector<std::uint32_t> mwid_fdids;    // MWID order (aligned to MWMO)
+  std::vector<ENTRY_MDDF> lModelInstances;
+  std::vector<ENTRY_MODF> lWMOInstances;
+
+  _preserved_root_chunks.clear();
+  _preserved_obj_chunks.clear();
+  _modern_mmdx_paths.clear();
+  _modern_mwmo_paths.clear();
+  _modern_mdids.clear();
+  _modern_tex_meta.clear();
+  _modern_custom_texture_paths.clear();
+  _modern_mamp_present = false;
+
+  // - Root file ---------------------------------------------
+  // Walked sequentially since there is no MCIN offset table.
+
+  for (size_t pos = 0; pos + 8 <= theFile.getSize(); )
+  {
+    theFile.seek(pos);
+    theFile.read(&fourcc, 4);
+    theFile.read(&size, 4);
+
+    if (pos + 8 + size > theFile.getSize())
+    {
+      LogError << "Corrupt chunk entry at offset " << pos << " of \"" << root_path
+               << "\", stopping the tile parse there." << std::endl;
+      break;
+    }
+
+    size_t const data_pos = pos + 8;
+
+    switch (fourcc)
+    {
+    case 'MVER':
+      // version checked by the caller
+      break;
+
+    case 'MHDR':
+      if (size >= sizeof(MHDR))
+      {
+        theFile.seek(data_pos);
+        theFile.read(&_original_mhdr, sizeof(MHDR));
+        mFlags = _original_mhdr.flags;
+      }
+      break;
+
+    case 'MFBO':
+      {
+        theFile.seek(data_pos);
+
+        int16_t mMaximum[9], mMinimum[9];
+        theFile.read(mMaximum, sizeof(mMaximum));
+        theFile.read(mMinimum, sizeof(mMinimum));
+
+        const float xPositions[] = { this->xbase, this->xbase + 266.0f, this->xbase + 533.0f };
+        const float yPositions[] = { this->zbase, this->zbase + 266.0f, this->zbase + 533.0f };
+
+        for (int y = 0; y < 3; y++)
+        {
+          for (int x = 0; x < 3; x++)
+          {
+            int idx = x + y * 3;
+            // fix bug with old noggit version inverting values
+            auto&& z{ std::minmax (mMinimum[idx], mMaximum[idx]) };
+
+            mMinimumValues[idx] = { xPositions[x], static_cast<float>(z.first), yPositions[y] };
+            mMaximumValues[idx] = { xPositions[x], static_cast<float>(z.second), yPositions[y] };
+          }
+        }
+      }
+      break;
+
+    case 'MH2O':
+      Water.readFromFile(theFile, data_pos);
+      break;
+
+    case 'MCNK':
+      if (root_chunk_offsets.size() < 256)
+      {
+        root_chunk_offsets.push_back(pos);
+      }
+      break;
+
+    // legacy single-file layout leftovers: those chunks live in the sibling
+    // files of the split format and are regenerated by the writers
+    case 'MCIN':
+    case 'MTEX':
+    case 'MMDX':
+    case 'MMID':
+    case 'MWMO':
+    case 'MWID':
+    case 'MDDF':
+    case 'MODF':
+    case 'MTXF':
+      break;
+
+    default:
+      // unknown tile level chunks (blend meshes MBMH/MBBB/MBNV/MBMI, future
+      // additions, ...) are preserved verbatim and re-emitted on save
+      {
+        PreservedChunk chunk;
+        chunk.fourcc = fourcc;
+        chunk.data.resize(size);
+
+        theFile.seek(data_pos);
+        theFile.read(chunk.data.data(), size);
+
+        _preserved_root_chunks.push_back(std::move(chunk));
+      }
+      break;
+    }
+
+    pos += 8 + size;
+  }
+
+  // - _tex0 file --------------------------------------------
+
+  if (tex_file)
+  {
+    try
+    {
+      for (size_t pos = 0; pos + 8 <= tex_file->getSize(); )
+      {
+        tex_file->seek(pos);
+        tex_file->read(&fourcc, 4);
+        tex_file->read(&size, 4);
+
+        if (pos + 8 + size > tex_file->getSize())
+        {
+          LogError << "Corrupt chunk entry at offset " << pos << " of the _tex0 file of \""
+                   << root_path << "\", stopping the parse there." << std::endl;
+          break;
+        }
+
+        switch (fourcc)
+        {
+        case 'MVER':
+          break;
+
+        case 'MCNK':
+          if (tex_chunk_offsets.size() < 256)
+          {
+            tex_chunk_offsets.push_back(pos);
+          }
+          break;
+
+        case 'MDID':
+          // diffuse terrain texture FileDataIDs
+          {
+            uint32_t const count = size / 4;
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+              uint32_t fdid = 0;
+              tex_file->read(&fdid, 4);
+
+              _modern_mdids.push_back(fdid);
+
+              std::string path = fdid ? listfile->getPath(fdid) : "";
+
+              if (!path.empty())
+              {
+                path = BlizzardArchive::ClientData::normalizeFilenameInternal(path);
+              }
+              else
+              {
+                // unresolved: either a FileDataID missing from the listfile
+                // (kept recoverable in the placeholder name) or a custom
+                // texture (fdid 0, its path is restored from the sidecar)
+                path = modern_fdid_placeholder_name(fdid);
+              }
+
+              mdid_paths.push_back(path);
+            }
+          }
+          break;
+
+        case 'MHID':
+          // height texture FileDataIDs, aligned to MDID (0 = no height texture)
+          {
+            uint32_t const count = size / 4;
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+              uint32_t fdid = 0;
+              tex_file->read(&fdid, 4);
+
+              if (fdid && i < mdid_paths.size())
+              {
+                auto& meta = _modern_tex_meta[mdid_paths[i]];
+                meta.has_height = true;
+                meta.height_fdid = fdid;
+              }
+            }
+          }
+          break;
+
+        case 'MTXF':
+          // per texture flags, aligned to MDID
+          {
+            uint32_t const count = size / sizeof(mtxf_entry);
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+              mtxf_entry entry;
+              tex_file->read(&entry, sizeof(mtxf_entry));
+
+              if (i < mdid_paths.size())
+              {
+                auto& meta = _modern_tex_meta[mdid_paths[i]];
+                meta.has_mtxf = true;
+                meta.mtxf = entry;
+              }
+            }
+          }
+          break;
+
+        case 'MTXP':
+          // texture params (SMTextureParams, 16 bytes), aligned to MDID
+          {
+            uint32_t const count = size / 16;
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+              uint32_t flags;
+              float height_scale;
+              float height_offset;
+              uint32_t padding;
+
+              tex_file->read(&flags, 4);
+              tex_file->read(&height_scale, 4);
+              tex_file->read(&height_offset, 4);
+              tex_file->read(&padding, 4);
+
+              if (i < mdid_paths.size())
+              {
+                auto& meta = _modern_tex_meta[mdid_paths[i]];
+                meta.has_mtxp = true;
+                meta.mtxp_flags = flags;
+                meta.mtxp_height_scale = height_scale;
+                meta.mtxp_height_offset = height_offset;
+              }
+            }
+          }
+          break;
+
+        case 'MTCG':
+          // color grading info (16 bytes), aligned to MDID
+          {
+            uint32_t const count = size / 16;
+
+            for (uint32_t i = 0; i < count; ++i)
+            {
+              uint32_t values[4];
+              tex_file->read(values, 16);
+
+              if (i < mdid_paths.size())
+              {
+                auto& meta = _modern_tex_meta[mdid_paths[i]];
+                meta.has_mtcg = true;
+                std::copy(values, values + 4, meta.mtcg);
+              }
+            }
+          }
+          break;
+
+        case 'MAMP':
+          // texture scale override (1 byte)
+          if (size >= 1)
+          {
+            char value = 0;
+            tex_file->read(&value, 1);
+            _modern_mamp_present = true;
+            _modern_mamp = static_cast<std::uint8_t>(value);
+          }
+          break;
+
+        default:
+          // other texture level chunks are not aligned to anything the editor
+          // would produce and are therefore skipped instead of mis-preserved
+          break;
+        }
+
+        pos += 8 + size;
+      }
+    }
+    catch (...)
+    {
+      LogError << "Failed to parse the _tex0 file of \"" << root_path
+               << "\", the tile's textures won't be available." << std::endl;
+      tex_file.reset();
+      tex_chunk_offsets.clear();
+      mdid_paths.clear();
+      _modern_mdids.clear();
+      _modern_tex_meta.clear();
+    }
+  }
+
+  // terrain texture table used by the chunk texture sets
+  mTextureFilenames = mdid_paths;
+
+  // restore the paths of the custom (FileDataID 0) textures from the sidecar
+  loadModernTextureSidecar();
+
+  for (auto const& custom_texture : _modern_custom_texture_paths)
+  {
+    int const slot = custom_texture.first;
+
+    if (slot >= 0 && static_cast<size_t>(slot) < mTextureFilenames.size()
+        && static_cast<size_t>(slot) < _modern_mdids.size() && _modern_mdids[slot] == 0)
+    {
+      mTextureFilenames[slot] = BlizzardArchive::ClientData::normalizeFilenameInternal(custom_texture.second);
+    }
+  }
+
+  // - _obj0 file --------------------------------------------
+  // The name tables and placements are read even when the models themselves
+  // aren't loaded so they survive a potential re-save in the original order.
+
+  if (obj_file)
+  {
+    try
+    {
+      for (size_t pos = 0; pos + 8 <= obj_file->getSize(); )
+      {
+        obj_file->seek(pos);
+        obj_file->read(&fourcc, 4);
+        obj_file->read(&size, 4);
+
+        if (pos + 8 + size > obj_file->getSize())
+        {
+          LogError << "Corrupt chunk entry at offset " << pos << " of the _obj0 file of \""
+                   << root_path << "\", stopping the parse there." << std::endl;
+          break;
+        }
+
+        size_t const data_pos = pos + 8;
+
+        switch (fourcc)
+        {
+        case 'MVER':
+          break;
+
+        case 'MMDX':
+          {
+            obj_file->seek(data_pos);
+
+            char const* lCurPos = reinterpret_cast<char const*>(obj_file->getPointer());
+            char const* lEnd = lCurPos + size;
+
+            while (lCurPos < lEnd)
+            {
+              mModelFilenames.push_back(BlizzardArchive::ClientData::normalizeFilenameInternal(std::string(lCurPos)));
+              lCurPos += strlen(lCurPos) + 1;
+            }
+          }
+          break;
+
+        case 'MMID':
+          {
+            uint32_t const count = size / 4;
+            mmid_fdids.resize(count);
+            obj_file->seek(data_pos);
+            obj_file->read(mmid_fdids.data(), count * 4);
+          }
+          break;
+
+        case 'MWMO':
+          {
+            obj_file->seek(data_pos);
+
+            char const* lCurPos = reinterpret_cast<char const*>(obj_file->getPointer());
+            char const* lEnd = lCurPos + size;
+
+            while (lCurPos < lEnd)
+            {
+              mWMOFilenames.push_back(BlizzardArchive::ClientData::normalizeFilenameInternal(std::string(lCurPos)));
+              lCurPos += strlen(lCurPos) + 1;
+            }
+          }
+          break;
+
+        case 'MWID':
+          {
+            uint32_t const count = size / 4;
+            mwid_fdids.resize(count);
+            obj_file->seek(data_pos);
+            obj_file->read(mwid_fdids.data(), count * 4);
+          }
+          break;
+
+        case 'MDDF':
+          {
+            obj_file->seek(data_pos);
+
+            ENTRY_MDDF const* mddf_ptr = reinterpret_cast<ENTRY_MDDF const*>(obj_file->getPointer());
+
+            for (unsigned int i = 0; i < size / sizeof(ENTRY_MDDF); ++i)
+            {
+              lModelInstances.push_back(mddf_ptr[i]);
+            }
+          }
+          break;
+
+        case 'MODF':
+          {
+            obj_file->seek(data_pos);
+
+            ENTRY_MODF const* modf_ptr = reinterpret_cast<ENTRY_MODF const*>(obj_file->getPointer());
+
+            for (unsigned int i = 0; i < size / sizeof(ENTRY_MODF); ++i)
+            {
+              lWMOInstances.push_back(modf_ptr[i]);
+
+              if (lWMOInstances.back().scale == 0)
+              {
+                lWMOInstances.back().scale = 1024;
+              }
+            }
+          }
+          break;
+
+        case 'MCNK':
+          // MCRD/MCRW per-chunk model references, regenerated on save
+          break;
+
+        default:
+          // unknown object level chunks (MWDR/MWDS WMO doodad sets, future
+          // additions, ...) are preserved verbatim and re-emitted on save
+          {
+            PreservedChunk chunk;
+            chunk.fourcc = fourcc;
+            chunk.data.resize(size);
+
+            obj_file->seek(data_pos);
+            obj_file->read(chunk.data.data(), size);
+
+            _preserved_obj_chunks.push_back(std::move(chunk));
+          }
+          break;
+        }
+
+        pos += 8 + size;
+      }
+    }
+    catch (...)
+    {
+      LogError << "Failed to parse the _obj0 file of \"" << root_path
+               << "\", the tile's models won't be available." << std::endl;
+      lModelInstances.clear();
+      lWMOInstances.clear();
+      _preserved_obj_chunks.clear();
+    }
+  }
+
+  _modern_mmdx_paths = mModelFilenames;
+  _modern_mwmo_paths = mWMOFilenames;
+
+  // - Load the models ----------------------------------------
+  // Modern MDDF/MODF entries may reference their model by FileDataID directly
+  // (flag 0x40 / 0x8) instead of indexing the MMDX/MWMO name tables.
+
+  if (_load_models)
+  {
+    for (auto const& object : lWMOInstances)
+    {
+      BlizzardArchive::Listfile::FileKey key;
+
+      if (object.flags & 0x8) // modf_flag_entry_is_filedata_id
+      {
+        std::string const path = listfile->getPath(object.nameID);
+        key = path.empty() ? BlizzardArchive::Listfile::FileKey(object.nameID)
+                           : BlizzardArchive::Listfile::FileKey(path, object.nameID);
+      }
+      else if (object.nameID < mWMOFilenames.size())
+      {
+        std::uint32_t fdid = 0;
+
+        if (object.nameID < mwid_fdids.size())
+        {
+          fdid = mwid_fdids[object.nameID];
+        }
+
+        if (!fdid)
+        {
+          fdid = listfile->getFileDataID(mWMOFilenames[object.nameID]);
+        }
+
+        key = BlizzardArchive::Listfile::FileKey(mWMOFilenames[object.nameID], fdid);
+      }
+      else
+      {
+        LogError << "Out of range nameID " << object.nameID << " in the MODF chunk of \""
+                 << root_path << "\" (" << mWMOFilenames.size() << " names), skipping the object."
+                 << std::endl;
+        continue;
+      }
+
+      try
+      {
+        add_model(_world->add_wmo_instance(WMOInstance(key, &object, _context), _tile_is_being_reloaded, false));
+      }
+      catch (std::exception const& e)
+      {
+        LogError << "Failed to load a WMO instance (\"" << key.stringRepr() << "\"): " << e.what() << std::endl;
+      }
+    }
+
+    for (auto const& model : lModelInstances)
+    {
+      BlizzardArchive::Listfile::FileKey key;
+
+      if (model.flags & 0x40) // mddf_flag_entry_is_filedata_id
+      {
+        std::string const path = listfile->getPath(model.nameID);
+        key = path.empty() ? BlizzardArchive::Listfile::FileKey(model.nameID)
+                           : BlizzardArchive::Listfile::FileKey(path, model.nameID);
+      }
+      else if (model.nameID < mModelFilenames.size())
+      {
+        std::uint32_t fdid = 0;
+
+        if (model.nameID < mmid_fdids.size())
+        {
+          fdid = mmid_fdids[model.nameID];
+        }
+
+        if (!fdid)
+        {
+          fdid = listfile->getFileDataID(mModelFilenames[model.nameID]);
+        }
+
+        key = BlizzardArchive::Listfile::FileKey(mModelFilenames[model.nameID], fdid);
+      }
+      else
+      {
+        LogError << "Out of range nameID " << model.nameID << " in the MDDF chunk of \""
+                 << root_path << "\" (" << mModelFilenames.size() << " names), skipping the model."
+                 << std::endl;
+        continue;
+      }
+
+      try
+      {
+        add_model(_world->add_model_instance(ModelInstance(key, &model, _context), _tile_is_being_reloaded, false));
+      }
+      catch (std::exception const& e)
+      {
+        LogError << "Failed to load a model instance (\"" << key.stringRepr() << "\"): " << e.what() << std::endl;
+      }
+    }
+
+    _world->need_model_updates = true;
+  }
+
+  // - Load chunks -------------------------------------------
+
+  bool const have_tex_chunks = tex_file && tex_chunk_offsets.size() >= 256;
+
+  if (tex_file && !have_tex_chunks)
+  {
+    LogError << "The _tex0 file of \"" << root_path << "\" holds " << tex_chunk_offsets.size()
+             << " chunks instead of 256, the tile's textures won't be available." << std::endl;
+  }
+
+  for (int nextChunk = 0; nextChunk < 256; ++nextChunk)
+  {
+    unsigned x = nextChunk / 16;
+    unsigned z = nextChunk % 16;
+
+    if (static_cast<size_t>(nextChunk) >= root_chunk_offsets.size())
+    {
+      LogError << "MCNK " << nextChunk << " of \"" << root_path << "\" missing ("
+               << root_chunk_offsets.size() << " present), creating an empty chunk." << std::endl;
+
+      mChunks[x][z] = std::make_unique<MapChunk> (this, nullptr, mBigAlpha, _mode, _context, true, nextChunk);
+      _renderer.initChunkData(mChunks[x][z].get());
+      continue;
+    }
+
+    theFile.seek(root_chunk_offsets[nextChunk]);
+
+    mChunks[x][z] = std::make_unique<MapChunk> (this, &theFile, mBigAlpha, _mode, _context
+                                                , false, nextChunk, _load_textures
+                                                , have_tex_chunks ? tex_file.get() : nullptr
+                                                , have_tex_chunks ? tex_chunk_offsets[nextChunk] : 0);
+
+    auto& chunk = mChunks[x][z];
+
+    _renderer.initChunkData(chunk.get());
+  }
+  // can be cleared after texture sets are loaded in chunks.
+  mTextureFilenames.clear();
+  _mtxf_entries.clear();
+
+  theFile.close();
+
+  // - Really done. -------------------------------------------
 
   LogDebug << "Done loading tile " << index.x << "," << index.z << "." << std::endl;
   finished = true;

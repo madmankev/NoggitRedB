@@ -208,7 +208,79 @@ private:
   // std::vector<std::string> mModelFilenames;
   // std::vector<std::string> mWMOFilenames;
   std::map<std::string, mtxf_entry> _mtxf_entries;
-  
+
+  // 9.1.5x (Shadowlands): modern split ADT format support ----------------------
+  // See docs/MODERN_ADT.md for the format decisions and known limitations.
+
+  // whether this tile of this project uses the modern (Battle for Azeroth 8.1+ /
+  // Shadowlands) split-file format (root + _tex0 + _obj0) instead of the
+  // single-file (pre Cataclysm) format
+  [[nodiscard]] bool isModernFormat() const;
+
+  // saves the tile in the modern split format (root.adt, _tex0.adt and
+  // _obj0.adt in the project folder)
+  void saveModernADT(World* world);
+
+  // kept verbatim from the loaded file (per texture path, aligned to MDID) so
+  // modern-only terrain features survive a load->save round trip even though
+  // the editor has no UI for them
+  struct ModernTextureMeta
+  {
+    bool has_height = false;
+    uint32_t height_fdid = 0;         // MHID entry, 0 = no height texture
+    bool has_mtxf = false;
+    mtxf_entry mtxf = {};             // MTXF entry
+    bool has_mtxp = false;
+    uint32_t mtxp_flags = 0;          // SMTextureParams.flags
+    float mtxp_height_scale = 0.0f;
+    float mtxp_height_offset = 1.0f;
+    bool has_mtcg = false;
+    uint32_t mtcg[4] = {0, 0, 0, 0};  // color grading info
+  };
+  std::map<std::string, ModernTextureMeta> _modern_tex_meta;
+
+  // terrain texture FileDataIDs of the current file (aligned to
+  // mTextureFilenames, 0 = could not be resolved from the listfile, custom file)
+  std::vector<uint32_t> _modern_mdids;
+
+  // model/wmo paths in the order they were first read. On save these come
+  // first in MMDX/MWMO so indices referenced by preserved binary data (blend
+  // meshes) stay valid, new entries are appended.
+  std::vector<std::string> _modern_mmdx_paths;
+  std::vector<std::string> _modern_mwmo_paths;
+
+  // preserved raw chunk payloads (without the 8 byte chunk headers),
+  // re-emitted verbatim on save: tile level root chunks Noggit doesn't
+  // understand (e.g. blend meshes MBMH/MBBB/MBNV/MBMI) and the object level
+  // chunks MWDR/MWDS (WMO doodad sets)
+  struct PreservedChunk
+  {
+    uint32_t fourcc;
+    std::vector<char> data;
+  };
+  std::vector<PreservedChunk> _preserved_root_chunks;
+  std::vector<PreservedChunk> _preserved_obj_chunks;
+
+  // MHDR of the loaded file (kept for fields Noggit doesn't model, e.g. the
+  // mamp value byte and padding)
+  MHDR _original_mhdr = {};
+
+  // MAMP chunk of the _tex0 file (texture scale override), preserved verbatim
+  bool _modern_mamp_present = false;
+  std::uint8_t _modern_mamp = 0;
+
+  // custom (not resolvable to a FileDataID) terrain texture paths, persisted
+  // next to the tile as json so modern saves stay editable in Noggit
+  std::map<int, std::string> _modern_custom_texture_paths;
+
+  // 9.1.5x: body of the modern split ADT (root + _tex0 + _obj0) reading path,
+  // called by finishLoading for modern format tiles
+  void finishLoadingModern(BlizzardArchive::ClientFile& root_file);
+
+  void loadModernTextureSidecar();
+  void saveModernTextureSidecar(std::vector<std::string> const& texture_paths
+    , std::vector<uint32_t> const& texture_fdids) const;
+
   std::vector<uint32_t> uids;
   tsl::robin_map<AsyncObject*, std::vector<SceneObject*>> object_instances; // only includes M2 and WMO. perhaps a medium common ancestor then?
 

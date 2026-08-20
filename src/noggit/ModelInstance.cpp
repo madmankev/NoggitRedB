@@ -37,6 +37,9 @@ ModelInstance::ModelInstance(BlizzardArchive::Listfile::FileKey const& file_key
   dir = math::degrees::vec3( math::degrees(d->rot[0])._, math::degrees(d->rot[1])._, math::degrees(d->rot[2])._);
 	// scale factor - divide by 1024. blizzard devs must be on crack, why not just use a float?
 	scale = d->scale / 1024.0f;
+  // 9.1.5x: keep the original flags (minus the filedata-id marker, that one
+  // is recomputed from the referenced key every save)
+  mddf_flags = static_cast<std::uint16_t>(d->flags & ~0x40);
   _need_recalc_extents = true;
 }
 
@@ -45,6 +48,7 @@ ModelInstance::ModelInstance(ModelInstance&& other) noexcept
   , model(std::move(other.model))
   , light_color(other.light_color)
   , size_cat(other.size_cat)
+  , mddf_flags(other.mddf_flags)
   , _need_recalc_extents(other._need_recalc_extents)
 {
   pos = other.pos;
@@ -66,6 +70,7 @@ ModelInstance& ModelInstance::operator= (ModelInstance&& other) noexcept
   std::swap(uid, other.uid);
   std::swap(scale, other.scale);
   std::swap(size_cat, other.size_cat);
+  std::swap(mddf_flags, other.mddf_flags);
   std::swap(_need_recalc_extents, other._need_recalc_extents);
   std::swap(extents, other.extents);
   std::swap(_transform_mat_inverted, other._transform_mat_inverted);

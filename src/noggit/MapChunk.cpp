@@ -20,13 +20,16 @@
 #include <noggit/World.h>
 #include <util/sExtendableArray.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <map>
 #include <QImage>
 
 MapChunk::MapChunk(MapTile* maintile, BlizzardArchive::ClientFile* f, bool bigAlpha,tile_mode mode
-                    , Noggit::NoggitRenderContext context, bool init_empty, int chunk_idx, bool load_textures)
+                    , Noggit::NoggitRenderContext context, bool init_empty, int chunk_idx, bool load_textures
+                    , BlizzardArchive::ClientFile* modern_tex_file, size_t modern_tex_chunk_offset)
   : _mode(mode)
   , mt(maintile)
   , use_big_alphamap(bigAlpha)
@@ -179,6 +182,20 @@ MapChunk::MapChunk(MapTile* maintile, BlizzardArchive::ClientFile* f, bool bigAl
       }
     }
 
+  }
+
+  // 9.1.5x (Shadowlands): modern split ADT. The geometry (MCVT/MCNR/MCCV/MCSE)
+  // comes from the root file's MCNKs (parsed by scanning the sub-chunks, the
+  // header offsets can't be trusted there: high res holes share the offset
+  // fields), textures/layers (MCLY/MCAL), shadows (MCSH) and materials (MCMT)
+  // come from the header-less MCNKs of the _tex0 sibling file. Models are
+  // placed from MDDF/MODF of the _obj0 sibling on tile level.
+  // See docs/MODERN_ADT.md.
+  if (maintile->isModernFormat())
+  {
+    readModernSplit(f, base, tmp_chunk_header, chunk_idx
+      , modern_tex_file, modern_tex_chunk_offset, load_textures);
+    return;
   }
 
   if (!load_textures)
@@ -368,6 +385,386 @@ MapChunk::MapChunk(MapTile* maintile, BlizzardArchive::ClientFile* f, bool bigAl
           sound_emitters.emplace_back(sound_emitter);
       }
   }
+}
+
+uint16_t MapChunk::foldHighResHoles(uint64_t holes_high_res)
+{
+  // 9.1.5x: the 8x8 high res hole map (1 bit per cell, (Holes[row] >> col) & 1)
+  // is folded down to Noggit's 4x4 low res hole map used for editing: any of the
+  // four high res cells of a quadrant being a hole makes the quadrant a hole.
+  uint16_t low_res = 0;
+
+  for (int row = 0; row < 4; ++row)
+  {
+    for (int col = 0; col < 4; ++col)
+    {
+      bool any_hole = false;
+
+      for (int dy = 0; dy < 2 && !any_hole; ++dy)
+      {
+        for (int dx = 0; dx < 2 && !any_hole; ++dx)
+        {
+          any_hole = (holes_high_res >> ((row * 2 + dy) * 8 + (col * 2 + dx))) & 1ULL;
+        }
+      }
+
+      if (any_hole)
+      {
+        low_res |= static_cast<uint16_t>(1u << (row * 4 + col));
+      }
+    }
+  }
+
+  return low_res;
+}
+
+void MapChunk::readModernSplit(BlizzardArchive::ClientFile* f, size_t base, MapChunkHeader& header
+  , int /*chunk_idx*/, BlizzardArchive::ClientFile* tex_file, size_t tex_chunk_offset, bool load_textures)
+{
+  // 9.1.5x (Shadowlands) modern split ADT reading, see docs/MODERN_ADT.md.
+  //
+  // root file MCNK: has the regular 0x80 header but the sub-chunks are located
+  // by scanning (offsets in the header share bytes with the high res hole map).
+  uint32_t fourcc;
+  uint32_t size;
+  uint32_t mcnk_size;
+
+  hasMCCV = false;
+  memset(_shadow_map, 0, 64 * 64);
+
+  // holes: modern files can carry a 8x8 (64 bit) hole map, fold it down to
+  // Noggit's 4x4 (16 bit) editor resolution. The MCNK flag and the hole data
+  // slot (0x14) replace the ofsHeight/ofsNormal header fields.
+  if (header_flags.flags.high_res_holes)
+  {
+    uint64_t holes_high_res = 0;
+    f->seek(base + 8 + 0x14);
+    f->read(&holes_high_res, 8);
+    holes = foldHighResHoles(holes_high_res);
+  }
+  else
+  {
+    holes &= 0xFFFF;
+  }
+
+  f->seek(base + 4);
+  f->read(&mcnk_size, 4);
+
+  size_t const sub_begin = base + 8 + 0x80;
+  size_t const sub_end = base + 8 + mcnk_size;
+
+  bool got_heights = false;
+
+  for (size_t pos = sub_begin; pos + 8 <= sub_end; )
+  {
+    f->seek(pos);
+    f->read(&fourcc, 4);
+    f->read(&size, 4);
+
+    // corrupt data guard: stop scanning when a bogus size is found
+    if (pos + 8 + size > sub_end)
+    {
+      break;
+    }
+
+    switch (fourcc)
+    {
+    case 'MCVT':
+      {
+        glm::vec3* ttv = mVertices;
+
+        for (int j = 0; j < 17; ++j)
+        {
+          for (int i = 0; i < ((j % 2) ? 8 : 9); ++i)
+          {
+            float h;
+            f->read(&h, 4);
+
+            float xpos = i * UNITSIZE;
+            float zpos = j * 0.5f * UNITSIZE;
+            if (j % 2)
+            {
+              xpos += UNITSIZE * 0.5f;
+            }
+            glm::vec3 v = glm::vec3(xbase + xpos, ybase + h, zbase + zpos);
+            *ttv++ = v;
+            vmin.y = std::min(vmin.y, v.y);
+            vmax.y = std::max(vmax.y, v.y);
+          }
+        }
+        got_heights = true;
+      }
+      break;
+
+    case 'MCNR':
+      {
+        auto& tile_buffer = mt->getChunkHeightmapBuffer();
+        int chunk_start = (px * 16 + py) * mapbufsize * 4;
+
+        char nor[3];
+        for (int i = 0; i < mapbufsize; ++i)
+        {
+          f->read(nor, 3);
+          int pixel_start = chunk_start + i * 4;
+          tile_buffer[pixel_start] = nor[0] / 127.0f;
+          tile_buffer[pixel_start + 1] = nor[2] / 127.0f;
+          tile_buffer[pixel_start + 2] = nor[1] / 127.0f;
+        }
+      }
+      break;
+
+    case 'MCCV':
+      header_flags.flags.has_mccv = 1;
+      hasMCCV = true;
+      {
+        unsigned char t[4];
+        for (int i = 0; i < mapbufsize; ++i)
+        {
+          f->read(t, 4);
+          mccv[i] = glm::vec3((float)t[2] / 127.0f, (float)t[1] / 127.0f, (float)t[0] / 127.0f);
+        }
+      }
+      break;
+
+    case 'MCSE':
+      {
+        int const emitter_count = static_cast<int>(size) / 0x1C;
+
+        for (int i = 0; i < emitter_count; i++)
+        {
+          ENTRY_MCSE sound_emitter;
+          f->read(&sound_emitter, sizeof(ENTRY_MCSE));
+
+          float pos_x = sound_emitter.pos[1] * -1.0f + ZEROPOINT;
+          float pos_y = sound_emitter.pos[2];
+          float pos_z = sound_emitter.pos[0] * -1.0f + ZEROPOINT;
+
+          sound_emitter.pos[0] = pos_x;
+          sound_emitter.pos[1] = pos_y;
+          sound_emitter.pos[2] = pos_z;
+
+          sound_emitters.emplace_back(sound_emitter);
+        }
+      }
+      break;
+
+    case 'MCDD':
+      // detail doodad disable map, preserved verbatim
+      if (size >= 8)
+      {
+        f->read(_modern_preserved.mcdd.data(), 8);
+        _modern_preserved.has_mcdd = true;
+      }
+      break;
+
+    default:
+      // MCLV (baked vertex lighting, post Cataclysm) and everything else is
+      // skipped; MCLV is not preserved on save (documented limitation)
+      break;
+    }
+
+    pos += 8 + size;
+  }
+
+  if (!got_heights)
+  {
+    // no heights found (should never happen in valid files): flat fallback
+    glm::vec3* ttv = mVertices;
+    for (int j = 0; j < 17; ++j)
+    {
+      for (int i = 0; i < ((j % 2) ? 8 : 9); ++i)
+      {
+        *ttv++ = glm::vec3(xbase + i * UNITSIZE + ((j % 2) ? UNITSIZE * 0.5f : 0.0f)
+          , ybase, zbase + j * 0.5f * UNITSIZE);
+      }
+    }
+  }
+
+  vmin.x = xbase;
+  vmin.z = zbase;
+  vmax.x = xbase + 8 * UNITSIZE;
+  vmax.z = zbase + 8 * UNITSIZE;
+
+  update_intersect_points();
+
+  vcenter = (vmin + vmax) * 0.5f;
+
+  if (!hasMCCV)
+  {
+    glm::vec3 const mccv_default(1.f, 1.f, 1.f);
+    for (int i = 0; i < mapbufsize; ++i)
+    {
+      mccv[i] = mccv_default;
+    }
+  }
+
+  // ------- _tex0 file: texture layers, alphamaps, shadows, materials -------
+
+  size_t mcly_chunk_pos = 0;   // position of the MCLY chunk header
+  size_t mcly_size = 0;
+  size_t mcal_chunk_pos = 0;
+
+  if (tex_file)
+  {
+    tex_file->seek(tex_chunk_offset);
+    tex_file->read(&fourcc, 4);
+    tex_file->read(&mcnk_size, 4);
+
+    if (fourcc != 'MCNK')
+    {
+      LogError << "MapChunk::readModernSplit: expected MCNK at offset " << tex_chunk_offset
+               << " of the _tex0 file (found \"" << std::string(reinterpret_cast<char const*>(&fourcc), 4)
+               << "\" instead)" << std::endl;
+      tex_file = nullptr;
+    }
+  }
+
+  if (tex_file)
+  {
+    // the tex MCNKs have NO 0x80 header, sub-chunks start right after the chunk header
+    size_t const tex_sub_begin = tex_chunk_offset + 8;
+    size_t const tex_sub_end = tex_chunk_offset + 8 + mcnk_size;
+
+    bool has_mcsh_chunk = false;
+    size_t mcsh_data_pos = 0;
+
+    for (size_t pos = tex_sub_begin; pos + 8 <= tex_sub_end; )
+    {
+      tex_file->seek(pos);
+      tex_file->read(&fourcc, 4);
+      tex_file->read(&size, 4);
+
+      if (pos + 8 + size > tex_sub_end)
+      {
+        break;
+      }
+
+      switch (fourcc)
+      {
+      case 'MCLY':
+        mcly_chunk_pos = pos;
+        mcly_size = size;
+        break;
+
+      case 'MCAL':
+        mcal_chunk_pos = pos;
+        break;
+
+      case 'MCSH':
+        has_mcsh_chunk = true;
+        mcsh_data_pos = pos + 8;
+        break;
+
+      case 'MCMT':
+        // terrain material ids per layer, preserved verbatim
+        if (size >= 4)
+        {
+          tex_file->read(_modern_preserved.mcmt.data(), 4);
+          _modern_preserved.has_mcmt = true;
+        }
+        break;
+
+      default:
+        break;
+      }
+
+      pos += 8 + size;
+    }
+
+    // shadows (they live in the _tex0 file in the split format)
+    if (has_mcsh_chunk && header_flags.flags.has_mcsh)
+    {
+      char compressed_shadow_map[64 * 64 / 8];
+
+      tex_file->seek(mcsh_data_pos);
+      tex_file->read(&compressed_shadow_map, 0x200);
+
+      uint8_t* p = _shadow_map;
+      char* c = compressed_shadow_map;
+      for (int i = 0; i < 64 * 8; ++i)
+      {
+        for (int b = 0x01; b != 0x100; b <<= 1)
+        {
+          *p++ = ((*c) & b) ? 85 : 0;
+        }
+        c++;
+      }
+
+      if (!header_flags.flags.do_not_fix_alpha_map)
+      {
+        for (std::size_t i(0); i < 64; ++i)
+        {
+          _shadow_map[i * 64 + 63] = _shadow_map[i * 64 + 62];
+          _shadow_map[63 * 64 + i] = _shadow_map[62 * 64 + i];
+        }
+        _shadow_map[63 * 64 + 63] = _shadow_map[62 * 64 + 62];
+      }
+    }
+  }
+
+  // hand the texture machinery a synthetic header pointing into the _tex0
+  // file: the offsets are relative to the tex MCNK of this chunk, matching
+  // the semantics TextureSet expects from the legacy single-file layout.
+  uint32_t n_layers = 0;
+
+  if (tex_file && load_textures && mcly_chunk_pos && mcly_size)
+  {
+    n_layers = std::min<uint32_t>(mcly_size / sizeof(ENTRY_MCLY), 4u);
+
+    // validate the layer texture ids before handing them to the texture set,
+    // corrupt/out of range ids otherwise read past the texture filename table
+    tex_file->seek(mcly_chunk_pos + 8);
+
+    for (uint32_t i = 0; i < n_layers; ++i)
+    {
+      ENTRY_MCLY entry;
+      tex_file->read(&entry, sizeof(ENTRY_MCLY));
+
+      if (entry.textureID >= mt->mTextureFilenames.size())
+      {
+        LogError << "MapChunk::readModernSplit: out of range textureID " << entry.textureID
+                 << " in layer " << i << " (" << mt->mTextureFilenames.size()
+                 << " textures), dropping the remaining layers" << std::endl;
+        n_layers = i;
+        break;
+      }
+    }
+
+    if (n_layers > 1 && !mcal_chunk_pos)
+    {
+      LogError << "MapChunk::readModernSplit: " << n_layers << " layers but no MCAL chunk "
+               << "in the _tex0 file, dropping the additional layers" << std::endl;
+      n_layers = 1;
+    }
+  }
+
+  MapChunkHeader tex_chunk_header = {};
+  tex_chunk_header.flags.value = header_flags.value;
+  tex_chunk_header.nLayers = n_layers;
+
+  if (mcly_chunk_pos)
+  {
+    tex_chunk_header.ofsLayer = static_cast<uint32_t>(mcly_chunk_pos - tex_chunk_offset);
+  }
+
+  if (mcal_chunk_pos)
+  {
+    tex_chunk_header.ofsAlpha = static_cast<uint32_t>(mcal_chunk_pos - tex_chunk_offset);
+  }
+
+  std::copy(header.doodadMapping, header.doodadMapping + 8, tex_chunk_header.doodadMapping);
+  std::copy(header.doodadStencil, header.doodadStencil + 8, tex_chunk_header.doodadStencil);
+
+  // modern clients always use the 4096 byte (8 bit, bigalpha) MCAL mode;
+  // the Blizzard RLE compression is still applied per layer flag
+  use_big_alphamap = true;
+
+  // the texture set is always created (possibly with 0 layers), other code
+  // paths rely on it being present
+  texture_set = std::make_unique<TextureSet>(this, tex_file ? tex_file : f
+    , tex_file ? tex_chunk_offset : base, true
+    , !!header_flags.flags.do_not_fix_alpha_map
+    , _mode == tile_mode::uid_fix_all, _context, tex_chunk_header);
 }
 
 auto MapChunk::getHoleMask(void) const -> unsigned
@@ -1912,6 +2309,396 @@ void MapChunk::save(util::sExtendableArray& lADTFile
 
   lADTFile.GetPointer<sChunkHeader>(lMCNK_Position)->mSize = lMCNK_Size;
   lADTFile.GetPointer<MCIN>(lMCIN_Position + 8)->mEntries[py * 16 + px].size = lMCNK_Size + sizeof (sChunkHeader);
+}
+
+void MapChunk::saveModern(util::sExtendableArray& root_file
+                          , int& root_position
+                          , util::sExtendableArray& tex_file
+                          , int& tex_position
+                          , util::sExtendableArray& obj_file
+                          , int& obj_position
+                          , std::map<std::string, int>& texture_ids
+                          , std::vector<WMOInstance*>& object_instances
+                          , std::vector<ModelInstance*>& model_instances)
+{
+  // 9.1.5x (Shadowlands) modern split ADT writing, see docs/MODERN_ADT.md:
+  //  - root file: MCNK with 0x80 header + geometry (MCVT/MCCV/MCNR/MCSE/MCDD)
+  //  - tex file:  header-less MCNK with MCLY/MCSH/MCAL/MCMT
+  //  - obj file:  header-less MCNK with MCRD/MCRW
+
+  int lID;
+
+  // modern files always use the 4096 byte (8 bit) alpha maps, never "fixed"
+  // 63x63 maps, and Noggit only writes 16 bit (4x4) low res holes
+  header_flags.flags.do_not_fix_alpha_map = 1;
+  header_flags.flags.high_res_holes = 0;
+
+  // ---------------------------------------------------------------------
+  // per-chunk model references (MCRD/MCRW): which placements overlap this
+  // chunk (the modern equivalent of the pre-Cataclysm MCRF computation)
+  // ---------------------------------------------------------------------
+  std::list<int> doodad_ids;
+  std::list<int> object_ids;
+
+  std::array<glm::vec3, 2> chunk_extents;
+  chunk_extents[0] = glm::vec3(xbase, 0.0f, zbase);
+  chunk_extents[1] = glm::vec3(xbase + CHUNKSIZE, 0.0f, zbase + CHUNKSIZE);
+
+  lID = 0;
+  for (auto const& wmo : object_instances)
+  {
+    if (wmo->isInsideRect(&chunk_extents))
+    {
+      object_ids.push_back(lID);
+    }
+    lID++;
+  }
+
+  lID = 0;
+  for (auto const& model : model_instances)
+  {
+    if (model->isInsideRect(&chunk_extents))
+    {
+      doodad_ids.push_back(lID);
+    }
+    lID++;
+  }
+
+  // ---------------------------------------------------------------------
+  // root file: MCNK with 0x80 header + terrain geometry
+  // ---------------------------------------------------------------------
+  int root_mcnk_size = 0x80;
+  int const root_mcnk_position = root_position;
+
+  root_file.Extend(8 + 0x80);
+  SetChunkHeader(root_file, root_position, 'MCNK', root_mcnk_size);
+
+  auto const root_header = root_file.GetPointer<MapChunkHeader>(root_position + 8);
+
+  root_header->flags = header_flags;
+  root_header->ix = px;
+  root_header->iy = py;
+  root_header->zpos = zbase * -1.0f + ZEROPOINT;
+  root_header->xpos = xbase * -1.0f + ZEROPOINT;
+  root_header->ypos = mVertices[0].y;
+  root_header->holes = holes & 0xFFFF;
+  root_header->areaid = areaID;
+  root_header->nLayers = texture_set ? static_cast<std::uint32_t>(texture_set->num()) : 0;
+  root_header->nDoodadRefs = static_cast<std::uint32_t>(doodad_ids.size());
+  root_header->nMapObjRefs = static_cast<std::uint32_t>(object_ids.size());
+
+  root_header->ofsHeight = 0;
+  root_header->ofsNormal = 0;
+  root_header->ofsLayer = 0;
+  root_header->ofsRefs = 0;
+  root_header->ofsAlpha = 0;
+  root_header->sizeAlpha = 0;
+  root_header->ofsShadow = 0;
+  root_header->sizeShadow = 0;
+  root_header->ofsSndEmitters = 0;
+  root_header->nSndEmitters = 0;
+  root_header->ofsLiquid = 0;
+  root_header->sizeLiquid = 8;
+  root_header->ofsMCCV = 0;
+
+  if (texture_set)
+  {
+    // hackfix -- temp hackfix to bruteforce update + save
+    texture_set->apply_alpha_changes();
+    texture_set->updateDoodadMapping();
+
+    std::copy(texture_set->getDoodadMappingBase(), texture_set->getDoodadMappingBase() + 8
+      , root_header->doodadMapping);
+    *reinterpret_cast<std::uint64_t*>(root_header->doodadStencil)
+      = *reinterpret_cast<std::uint64_t const*>(texture_set->getDoodadStencilBase());
+  }
+  else
+  {
+    std::fill(root_header->doodadMapping, root_header->doodadMapping + 8, 0);
+    *reinterpret_cast<std::uint64_t*>(root_header->doodadStencil) = 0;
+  }
+
+  root_position += 8 + 0x80;
+
+  // MCVT
+  {
+    int const mcvt_size = mapbufsize * 4;
+
+    root_file.Extend(8 + mcvt_size);
+    SetChunkHeader(root_file, root_position, 'MCVT', mcvt_size);
+
+    root_header->ofsHeight = root_position - root_mcnk_position;
+
+    auto const heightmap = root_file.GetPointer<float>(root_position + 8);
+
+    for (int i = 0; i < mapbufsize; ++i)
+    {
+      heightmap[i] = mVertices[i].y - mVertices[0].y;
+    }
+
+    root_position += 8 + mcvt_size;
+    root_mcnk_size += 8 + mcvt_size;
+  }
+
+  // MCCV
+  if (hasMCCV)
+  {
+    int const mccv_size = mapbufsize * sizeof(unsigned int);
+
+    root_file.Extend(8 + mccv_size);
+    SetChunkHeader(root_file, root_position, 'MCCV', mccv_size);
+
+    root_header->ofsMCCV = root_position - root_mcnk_position;
+
+    auto const mccv_data = root_file.GetPointer<unsigned int>(root_position + 8);
+
+    for (int i = 0; i < mapbufsize; ++i)
+    {
+      mccv_data[i] = (((unsigned char)(mccv[i].z * 127.0f) & 0xFF) <<  0)
+                   + (((unsigned char)(mccv[i].y * 127.0f) & 0xFF) <<  8)
+                   + (((unsigned char)(mccv[i].x * 127.0f) & 0xFF) << 16);
+    }
+
+    root_position += 8 + mccv_size;
+    root_mcnk_size += 8 + mccv_size;
+  }
+
+  // MCNR: modern (Cata+) files include the 13 padding bytes in the chunk size
+  {
+    int const mcnr_size = mapbufsize * 3 + 13;
+
+    root_file.Extend(8 + mcnr_size);
+    SetChunkHeader(root_file, root_position, 'MCNR', mcnr_size);
+
+    root_header->ofsNormal = root_position - root_mcnk_position;
+
+    auto const normals = root_file.GetPointer<char>(root_position + 8);
+
+    auto& tile_buffer = mt->getChunkHeightmapBuffer();
+    int const chunk_start = (px * 16 + py) * mapbufsize * 4;
+
+    for (int i = 0; i < mapbufsize; ++i)
+    {
+      int const pixel_start = chunk_start + i * 4;
+
+      normals[i * 3 + 0] = static_cast<char>(tile_buffer[pixel_start] * 127);
+      normals[i * 3 + 1] = static_cast<char>(tile_buffer[pixel_start + 2] * 127);
+      normals[i * 3 + 2] = static_cast<char>(tile_buffer[pixel_start + 1] * 127);
+    }
+
+    // the padding bytes stay zeroed
+    std::fill(normals.get() + mapbufsize * 3, normals.get() + mcnr_size, 0);
+
+    root_position += 8 + mcnr_size;
+    root_mcnk_size += 8 + mcnr_size;
+  }
+
+  // MCSE
+  if (!sound_emitters.empty())
+  {
+    int const mcse_size = static_cast<int>(sizeof(ENTRY_MCSE) * sound_emitters.size());
+
+    root_file.Extend(8 + mcse_size);
+    SetChunkHeader(root_file, root_position, 'MCSE', mcse_size);
+
+    root_header->ofsSndEmitters = root_position - root_mcnk_position;
+    root_header->nSndEmitters = mcse_size / 0x1C;
+
+    root_position += 8;
+    root_mcnk_size += 8 + mcse_size;
+
+    for (auto& sound_emitter : sound_emitters)
+    {
+      auto const mcse = root_file.GetPointer<ENTRY_MCSE>(root_position);
+
+      mcse->soundId = sound_emitter.soundId;
+
+      mcse->pos[0] = ZEROPOINT - sound_emitter.pos[2];
+      mcse->pos[1] = ZEROPOINT - sound_emitter.pos[0];
+      mcse->pos[2] = sound_emitter.pos[1];
+
+      mcse->size[0] = sound_emitter.size[0];
+      mcse->size[1] = sound_emitter.size[1];
+      mcse->size[2] = sound_emitter.size[2];
+
+      root_position += 0x1C;
+    }
+  }
+
+  // MCDD: preserved detail doodad disable map
+  if (_modern_preserved.has_mcdd)
+  {
+    root_file.Extend(8 + 8);
+    SetChunkHeader(root_file, root_position, 'MCDD', 8);
+
+    auto const mcdd_data = root_file.GetPointer<std::uint8_t>(root_position + 8);
+    std::copy(_modern_preserved.mcdd.begin(), _modern_preserved.mcdd.end(), mcdd_data.get());
+
+    root_position += 16;
+    root_mcnk_size += 16;
+  }
+
+  root_file.GetPointer<sChunkHeader>(root_mcnk_position)->mSize = root_mcnk_size;
+
+  // ---------------------------------------------------------------------
+  // tex file: header-less MCNK with MCLY / MCSH / MCAL / MCMT
+  // ---------------------------------------------------------------------
+  std::vector<std::vector<uint8_t>> alphamaps;
+
+  if (texture_set)
+  {
+    alphamaps = texture_set->save_alpha(true);
+  }
+
+  int mcal_size = 0;
+  for (auto const& amap : alphamaps)
+  {
+    mcal_size += static_cast<int>(amap.size());
+  }
+
+  bool const write_shadows = has_shadows();
+  std::size_t const num_layers = texture_set ? texture_set->num() : 0;
+
+  int tex_mcnk_size = 0;
+  tex_mcnk_size += 8 + static_cast<int>(num_layers * sizeof(ENTRY_MCLY));   // MCLY
+  if (write_shadows)
+  {
+    tex_mcnk_size += 8 + 0x200;                                            // MCSH
+  }
+  tex_mcnk_size += 8 + mcal_size;                                          // MCAL
+  if (_modern_preserved.has_mcmt)
+  {
+    tex_mcnk_size += 8 + 4;                                                // MCMT
+  }
+
+  tex_file.Extend(8 + tex_mcnk_size);
+  SetChunkHeader(tex_file, tex_position, 'MCNK', tex_mcnk_size);
+  tex_position += 8;
+
+  // MCLY
+  {
+    int const mcly_size = static_cast<int>(num_layers * sizeof(ENTRY_MCLY));
+
+    SetChunkHeader(tex_file, tex_position, 'MCLY', mcly_size);
+
+    int mcum_mcal_offset = 0;
+
+    for (size_t j = 0; j < num_layers; ++j)
+    {
+      auto const layer = tex_file.GetPointer<ENTRY_MCLY>(tex_position + 8 + sizeof(ENTRY_MCLY) * j);
+
+      auto const texture_it = texture_ids.find(texture_set->filename(j));
+
+      if (texture_it == texture_ids.end())
+      {
+        // can only happen when a texture appeared between the table build and
+        // this write; fall back to the base layer texture
+        LogError << "MapChunk::saveModern: texture \"" << texture_set->filename(j)
+                 << "\" missing from the MDID table, using slot 0 instead" << std::endl;
+        layer->textureID = 0;
+      }
+      else
+      {
+        layer->textureID = static_cast<uint32_t>(texture_it->second);
+      }
+
+      layer->flags = texture_set->flag(j);
+      layer->ofsAlpha = mcum_mcal_offset;
+      layer->effectID = texture_set->effect(j);
+
+      if (j == 0)
+      {
+        layer->flags &= ~(FLAG_USE_ALPHA | FLAG_ALPHA_COMPRESSED);
+      }
+      else
+      {
+        layer->flags |= FLAG_USE_ALPHA;
+        // always written uncompressed (4096 bytes per layer map)
+        layer->flags &= ~FLAG_ALPHA_COMPRESSED;
+
+        mcum_mcal_offset += static_cast<int>(alphamaps[j - 1].size());
+      }
+    }
+
+    tex_position += 8 + mcly_size;
+  }
+
+  // MCSH: shadow data lives in the tex file for the split format, the flag
+  // stays in the root MCNK header
+  root_header->flags.flags.has_mcsh = write_shadows ? 1 : 0;
+
+  if (write_shadows)
+  {
+    SetChunkHeader(tex_file, tex_position, 'MCSH', 0x200);
+
+    auto const shadow_data = tex_file.GetPointer<char>(tex_position + 8);
+    auto const shadow_map = compressed_shadow_map();
+    memcpy(shadow_data.get(), shadow_map.data(), 0x200);
+
+    tex_position += 8 + 0x200;
+  }
+
+  // MCAL (always a single chunk holding every layer map, uncompressed)
+  {
+    SetChunkHeader(tex_file, tex_position, 'MCAL', mcal_size);
+
+    auto alpha_data = tex_file.GetPointer<char>(tex_position + 8);
+
+    for (auto& amap : alphamaps)
+    {
+      memcpy(alpha_data.get(), amap.data(), amap.size());
+      alpha_data += amap.size();
+    }
+
+    tex_position += 8 + mcal_size;
+  }
+
+  // MCMT: preserved terrain material ids
+  if (_modern_preserved.has_mcmt)
+  {
+    SetChunkHeader(tex_file, tex_position, 'MCMT', 4);
+
+    auto const mcmt_data = tex_file.GetPointer<std::uint8_t>(tex_position + 8);
+    std::copy(_modern_preserved.mcmt.begin(), _modern_preserved.mcmt.end(), mcmt_data.get());
+
+    tex_position += 8 + 4;
+  }
+
+  // ---------------------------------------------------------------------
+  // obj file: header-less MCNK with MCRD (doodad refs) / MCRW (wmo refs)
+  // ---------------------------------------------------------------------
+  int const obj_mcnk_size = (8 + 4 * static_cast<int>(doodad_ids.size()))
+                          + (8 + 4 * static_cast<int>(object_ids.size()));
+
+  obj_file.Extend(8 + obj_mcnk_size);
+  SetChunkHeader(obj_file, obj_position, 'MCNK', obj_mcnk_size);
+  obj_position += 8;
+
+  SetChunkHeader(obj_file, obj_position, 'MCRD', 4 * static_cast<int>(doodad_ids.size()));
+  {
+    auto const refs = obj_file.GetPointer<int>(obj_position + 8);
+
+    lID = 0;
+    for (int const doodad : doodad_ids)
+    {
+      refs[lID++] = doodad;
+    }
+
+    obj_position += 8 + 4 * static_cast<int>(doodad_ids.size());
+  }
+
+  SetChunkHeader(obj_file, obj_position, 'MCRW', 4 * static_cast<int>(object_ids.size()));
+  {
+    auto const refs = obj_file.GetPointer<int>(obj_position + 8);
+
+    lID = 0;
+    for (int const object : object_ids)
+    {
+      refs[lID++] = object;
+    }
+
+    obj_position += 8 + 4 * static_cast<int>(object_ids.size());
+  }
 }
 
 

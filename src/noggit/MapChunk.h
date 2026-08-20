@@ -16,6 +16,8 @@
 #include <map>
 #include <memory>
 #include <unordered_set>
+#include <vector>
+#include <cstdint>
 
 namespace BlizzardArchive
 {
@@ -75,7 +77,11 @@ private:
 
 public:
   MapChunk(MapTile* mt, BlizzardArchive::ClientFile* f, bool bigAlpha, tile_mode mode, Noggit::NoggitRenderContext context
-           , bool init_empty = false, int chunk_idx = 0, bool load_textures = true);
+           , bool init_empty = false, int chunk_idx = 0, bool load_textures = true
+           // 9.1.5x: the chunk's _tex0 file and the offset of its header-less
+           // MCNK in it (modern split ADT reading). Passing no file falls back
+           // to legacy single-file reading.
+           , BlizzardArchive::ClientFile* modern_tex_file = nullptr, size_t modern_tex_chunk_offset = 0);
 
   auto getHoleMask(void) const -> unsigned;
   MapTile *mt;
@@ -214,6 +220,45 @@ public:
             , std::vector<ModelInstance*>& lModelInstances
             , bool use_mclq_liquids
             );
+
+  // 9.1.5x (Shadowlands): saves the chunk's data spread over the modern
+  // split files (see docs/MODERN_ADT.md, ADT/v18 split files):
+  //  - root file:  MCNK header + MCVT/MCCV/MCNR/MCSE (+ preserved MCDD)
+  //  - tex file:   header-less MCNK with MCLY/MCSH/MCAL (+ preserved MCMT)
+  //  - obj file:   header-less MCNK with MCRD/MCRW (model references)
+  void saveModern(util::sExtendableArray& root_file
+            , int& root_position
+            , util::sExtendableArray& tex_file
+            , int& tex_position
+            , util::sExtendableArray& obj_file
+            , int& obj_position
+            , std::map<std::string, int>& texture_ids
+            , std::vector<WMOInstance*>& object_instances
+            , std::vector<ModelInstance*>& model_instances
+            );
+
+  // 9.1.5x: optional per-chunk preservation for data textures/shading the editor
+  // does not model (loaded from the _tex0/_root files, re-emitted on save)
+  struct ModernPreserved
+  {
+    bool has_mcmt = false;
+    std::array<std::uint8_t, 4> mcmt = {}; // terrain material ids per layer
+    bool has_mcdd = false;
+    std::array<std::uint8_t, 8> mcdd = {}; // detail doodad disable map
+  };
+  ModernPreserved _modern_preserved;
+
+private:
+  // 9.1.5x: body of the modern split-ADT reading path, see the constructor.
+  void readModernSplit(BlizzardArchive::ClientFile* root_file, size_t root_base
+    , MapChunkHeader& root_header, int chunk_idx
+    , BlizzardArchive::ClientFile* tex_file, size_t tex_chunk_offset, bool load_textures);
+
+public:
+
+  // 9.1.5x: folds a modern 64 bit (8x8) high res hole map down to Noggit's
+  // 16 bit (4x4) hole map (see ADT/v18 terrain holes)
+  static uint16_t foldHighResHoles(uint64_t holes_high_res);
 
   // fix the gaps with the chunk to the left
   bool fixGapLeft(const MapChunk* chunk);
