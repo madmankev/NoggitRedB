@@ -16,6 +16,11 @@ namespace BlizzardDatabaseLib
   class BlizzardDatabase;
 }
 
+namespace BlizzardArchive
+{
+  class ClientData;
+}
+
 namespace Noggit::Application
 {
   struct NoggitApplicationConfiguration;
@@ -109,6 +114,10 @@ namespace Noggit::Project
     std::string ProjectName;
     std::string ClientPath;
     ProjectVersion projectVersion;
+    // numeric game build of the client's data (e.g. 12340 for 3.3.5a, 39584 for
+    // 9.1.5x), used among other things to version the SQL cache table names.
+    // Set when the project (and its BlizzardDatabase) is created/loaded.
+    unsigned int ClientBuildId = 0;
     std::vector<NoggitProjectPinnedMap> PinnedMaps;
     std::vector<NoggitProjectBookmarkMap> Bookmarks;
     std::shared_ptr<BlizzardDatabaseLib::BlizzardDatabase> ClientDatabase;

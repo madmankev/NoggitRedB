@@ -39,7 +39,7 @@ namespace Noggit
       : std::runtime_error(msg.toStdString()) {}
   };
 
-  class Noggit::ClientDatabaseTable;
+  class ClientDatabaseTable;
   // calls client or server db adaptively. so /sql/ is not really a good location
   class ClientDatabase
   {
@@ -103,7 +103,6 @@ namespace Noggit
   private:
     const std::string _tableName;
     const QString _qtTableName;
-    const Structures::BlizzardDatabaseRowDefinition _row_definition;
 
   public:
     ClientDatabaseTable(std::string tableName);
@@ -111,9 +110,10 @@ namespace Noggit
     // table info
     const std::string Name() const { return _tableName; };
     unsigned int RecordCount() const;
-    int ColumnCount() const;
-    int getRecordSize() const;
-    Structures::BlizzardDatabaseRowDefinition& GetRecordDefinition() const;
+    // the .dbd record layout this table was loaded with, one entry per column
+    // (arrays and locs are single entries, use recordFormat() for the expanded
+    // SQL layout)
+    std::vector<BlizzardDatabaseLib::Structures::BlizzardDatabaseRowDefiniton> GetRecordDefinition() const;
 
     // get rows data
     std::optional<Structures::BlizzardDatabaseRow> RecordById(unsigned int id) const;

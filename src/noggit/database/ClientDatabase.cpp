@@ -9,6 +9,10 @@
 #include <QElapsedTimer>
 #include <QSettings>
 
+#include <algorithm>
+#include <cctype>
+#include <string>
+
 namespace Noggit
 {
 	// namespace Sql
@@ -51,7 +55,7 @@ namespace Noggit
 
 		// insert if fresh_table, otherwise replace?
 
-		auto& row_definition = GetRecordDefinition();
+		auto row_definition = GetRecordDefinition();
 		auto sql_record_format = recordFormat();
 
 		auto client_table_iterator = getClientTable().Records();
@@ -91,7 +95,7 @@ namespace Noggit
 			QStringList colValues;
 			colValues.reserve(column_names.size());
 
-			for (auto& column_def : row_definition.ColumnDefinitions)
+			for (auto& column_def : row_definition)
 			{
 				if (column_def.Type == "int" && column_def.isID)
 				{
@@ -218,14 +222,13 @@ namespace Noggit
 		const std::string sql_table_name = getSqlTableName();
 
 		auto db_record_format = recordFormat();
-		assert(db_record_format.size() == getClientTable().ColumnCount());
 
-		std::string statement = std::format("CREATE TABLE IF NOT EXISTS `{}` (", sql_table_name);
+		std::string statement = "CREATE TABLE IF NOT EXISTS `" + sql_table_name + "` (";
 
 		std::string primary_key_name;
 		for (auto& db_column_format : db_record_format)
 		{
-			statement += std::format("`{}` {}", db_column_format.Name, db_column_format.Type);
+			statement += "`" + db_column_format.Name + "` " + db_column_format.Type;
 
 			if (db_column_format.Type == "TEXT")
 			{
@@ -252,13 +255,13 @@ namespace Noggit
 		}
 
 		if (!primary_key_name.empty())
-			statement += std::format("PRIMARY KEY (`{}`)", primary_key_name);
+			statement += "PRIMARY KEY (`" + primary_key_name + "`)";
 
 		// Add indexes for relations
 		for (auto& db_column_format : db_record_format)
 		{
 			if (db_column_format.isRelation && !db_column_format.isID) {
-				statement += std::format(",\nINDEX (`{}`)", db_column_format.Name);
+				statement += ",\nINDEX (`" + db_column_format.Name + "`)";
 			}
 		}
 
@@ -292,10 +295,10 @@ namespace Noggit
 	{
 		auto record_format = std::vector<DbColumnFormat>();
 
-		auto& row_definition = GetRecordDefinition();
-		for (int col_idx = 0; col_idx < row_definition.ColumnDefinitions.size(); col_idx++)
+		auto row_definition = GetRecordDefinition();
+		for (size_t col_idx = 0; col_idx < row_definition.size(); col_idx++)
 		{
-			auto& column_def = row_definition.ColumnDefinitions[col_idx];
+			auto& column_def = row_definition[col_idx];
 
 			bool is_locstring = false;
 
@@ -341,11 +344,11 @@ namespace Noggit
 				}
 				else if (is_locstring)
 				{
-					col_name = std::format("{}_{}", column_def.Name, dbc_string_loc_names[i]); // {MapName_lang}_{enUS}
+					col_name = column_def.Name + "_" + dbc_string_loc_names[i]; // {MapName_lang}_{enUS}
 				}
 				else if (array_size > 1)
 				{
-					col_name = std::format("{}_{}", column_def.Name, i); // {MapName}_{0}
+					col_name = column_def.Name + "_" + std::to_string(i); // {MapName}_{0}
 				}
 				db_col_format.Name = col_name;
 				db_col_format.Type = sql_data_type;
@@ -353,14 +356,16 @@ namespace Noggit
 				assert(!(column_def.isID && array_size > 1));
 				db_col_format.isID = column_def.isID;
 				db_col_format.isRelation = column_def.isRelation;
-				db_col_format.isSigned = column_def.isSigned;
+				// the row definitions do not carry a signedness flag, assume
+				// signed ints unless the dbd type says otherwise
+				db_col_format.isSigned = !BlizzardDatabaseLib::Extension::String::Compare(column_def.Type, "uint");
 
 				record_format.push_back(db_col_format);
 			}
 			if (is_locstring) // add lang mask column
 			{
 				DbColumnFormat db_col_format;
-				db_col_format.Name = std::format("{}_flags", column_def.Name);
+				db_col_format.Name = column_def.Name + "_flags";
 				db_col_format.Type = "INT";
 				db_col_format.isSigned = false;
 				db_col_format.isID = false;
@@ -434,15 +439,15 @@ namespace Noggit
 	Structures::BlizzardDatabaseRow ClientDatabaseTable::sqlRecordToDatabaseRow(QSqlQuery& record) const
 
 	{
-		auto& row_definition = GetRecordDefinition();
+		auto row_definition = GetRecordDefinition();
 
 		auto database_row = Structures::BlizzardDatabaseRow(-1);
 
 		int Id = -1;
 		int field_idx = 0;
-		for (int column_def_idx = 0; column_def_idx < row_definition.ColumnDefinitions.size(); ++column_def_idx)
+		for (size_t column_def_idx = 0; column_def_idx < row_definition.size(); ++column_def_idx)
 		{
-			auto& column_def = row_definition.ColumnDefinitions[column_def_idx];
+			auto& column_def = row_definition[column_def_idx];
 			auto database_column = Structures::BlizzardDatabaseColumn();
 
 			if (column_def.Type == "locstring")
@@ -508,25 +513,6 @@ namespace Noggit
 		return client_count;
 	}
 
-	int ClientDatabaseTable::ColumnCount() const
-	{
-		// get from parsed definition
-		int def_column_count = recordFormat().size();
-
-		int client_count = getClientTable().ColumnCount();
-		assert(def_column_count == client_count);
-
-		if (ClientDatabase::databaseMode() == DatabaseMode::Sql)
-		{
-			auto db = Noggit::Sql::SqlDatabaseManager::instance().noggitDatabase();
-			QSqlRecord rec = db.record(QString::fromStdString(getSqlTableName()));
-			int db_count = rec.count();
-			assert(db_count == def_column_count);
-		}
-
-		return def_column_count;
-	}
-
 	std::optional<Structures::BlizzardDatabaseRow> ClientDatabaseTable::RecordById(unsigned int id) const
 	{
 		auto row = Structures::BlizzardDatabaseRow(-1);
@@ -562,20 +548,24 @@ namespace Noggit
 		return std::optional<Structures::BlizzardDatabaseRow>();
 	}*/
 
-	Structures::BlizzardDatabaseRowDefinition& ClientDatabaseTable::GetRecordDefinition() const
+	std::vector<BlizzardDatabaseLib::Structures::BlizzardDatabaseRowDefiniton> ClientDatabaseTable::GetRecordDefinition() const
 	{
-		return Noggit::Project::CurrentProject::get()->ClientDatabase->TableRecordDefinition(_tableName);
+		return getClientTable().GetRecordDefinition();
 	}
 
 	BlizzardDatabaseLib::BlizzardDatabaseTable& ClientDatabaseTable::getClientTable() const
 	{
-		return Noggit::Project::CurrentProject::get()->ClientDatabase->LoadTable(_tableName, readFileAsIMemStream);
+		// the pinned blizzard-database-library returns a const reference from
+		// LoadTable() even though its table API is not const qualified, newer
+		// revisions return a mutable reference. const_cast compiles with both.
+		return const_cast<BlizzardDatabaseLib::BlizzardDatabaseTable&>(
+			Noggit::Project::CurrentProject::get()->ClientDatabase->LoadTable(_tableName, readFileAsIMemStream));
 	}
 
 	// get from local dbc data memory stream in BlizzardDatabaseLib::BlizzardDatabase
 	Structures::BlizzardDatabaseRow ClientDatabaseTable::clientRowById(unsigned int id) const
 	{
-		auto record = getClientTable().RecordById(id);
+		auto record = getClientTable().Record(id);
 		return record;
 	}
 
@@ -614,7 +604,7 @@ namespace Noggit
 		if (build_id == 0)
 			build_id = Noggit::Project::CurrentProject::get()->buildId();
 
-		std::string table = std::format("db_{}_{}", _tableName, build_id);
+		std::string table = "db_" + _tableName + "_" + std::to_string(build_id);
 
 		// convert to lowercase for compatibility with SQL
 		std::transform(table.begin(), table.end(), table.begin(),

@@ -71,6 +71,7 @@ namespace Noggit::Project
       client_archive_version = BlizzardArchive::ClientVersion::SL;
       client_build = BlizzardDatabaseLib::Structures::Build("9.1.0.39584");
       client_archive_locale = BlizzardArchive::Locale::enUS;
+      project->ClientBuildId = 39584;
     }
 
     else if (project->projectVersion == ProjectVersion::WOTLK)
@@ -78,6 +79,7 @@ namespace Noggit::Project
       client_archive_version = BlizzardArchive::ClientVersion::WOTLK;
       client_build = BlizzardDatabaseLib::Structures::Build("3.3.5.12340");
       client_archive_locale = BlizzardArchive::Locale::AUTO;
+      project->ClientBuildId = 12340;
     }
 
     else
@@ -297,7 +299,9 @@ namespace Noggit::Project
 
     unsigned int NoggitProject::buildId()
     {
-      return ClientDatabase->getBuild();
+      // the game build is recorded on the project when it is loaded (the
+      // blizzard-database-library Build object has no public accessor for it)
+      return ClientBuildId;
     }
 
     void NoggitProject::createBookmark(const NoggitProjectBookmarkMap& bookmark)

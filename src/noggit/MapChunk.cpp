@@ -1401,11 +1401,13 @@ bool MapChunk::stampMCCV(glm::vec3 const& pos, glm::vec4 const& color, float cha
         // transparent mask areas leave the vertex color untouched.
         if (alpha > 0.0f)
         {
+          // note: QColor::*F() return qreal (double), cast before the float
+          // clamps or MSVC cannot deduce the std::min/std::max template type
           glm::vec3 const image_rgb
           {
-            std::min(std::max(image_color.redF() / 0.5f, 0.0f), 2.0f),
-            std::min(std::max(image_color.greenF() / 0.5f, 0.0f), 2.0f),
-            std::min(std::max(image_color.blueF() / 0.5f, 0.0f), 2.0f)
+            std::min(std::max(static_cast<float>(image_color.redF()) / 0.5f, 0.0f), 2.0f),
+            std::min(std::max(static_cast<float>(image_color.greenF()) / 0.5f, 0.0f), 2.0f),
+            std::min(std::max(static_cast<float>(image_color.blueF()) / 0.5f, 0.0f), 2.0f)
           };
 
           mccv[i].x += (image_rgb.x - mccv[i].x) * alpha;
