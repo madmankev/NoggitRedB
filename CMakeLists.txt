@@ -1,16 +1,22 @@
-#██████   █████    ███████      █████████    █████████  █████ ███████████    ███████████   ██████████ ██████████
-#░░██████ ░░███   ███░░░░░███   ███░░░░░███  ███░░░░░███░░███ ░█░░░███░░░█   ░░███░░░░░███ ░░███░░░░░█░░███░░░░███
-# ░███░███ ░███  ███     ░░███ ███     ░░░  ███     ░░░  ░███ ░   ░███  ░     ░███    ░███  ░███  █ ░  ░███   ░░███
-# ░███░░███░███ ░███      ░███░███         ░███          ░███     ░███        ░██████████   ░██████    ░███    ░███
-# ░███ ░░██████ ░███      ░███░███    █████░███    █████ ░███     ░███        ░███░░░░░███  ░███░░█    ░███    ░███
-# ░███  ░░█████ ░░███     ███ ░░███  ░░███ ░░███  ░░███  ░███     ░███        ░███    ░███  ░███ ░   █ ░███    ███
-# █████  ░░█████ ░░░███████░   ░░█████████  ░░█████████  █████    █████       █████   █████ ██████████ ██████████
-#░░░░░    ░░░░░    ░░░░░░░      ░░░░░░░░░    ░░░░░░░░░  ░░░░░    ░░░░░       ░░░░░   ░░░░░ ░░░░░░░░░░ ░░░░░░░░░░
-CMAKE_MINIMUM_REQUIRED(VERSION 3.11)
+#██████   █████    ███████      █████████    █████████  █████ ███████████    █████
+#░░██████ ░░███   ███░░░░░███   ███░░░░░███  ███░░░░░███░░███ ░█░░░███░░░█
+# ░███░███ ░███  ███     ░░███ ███     ░░░  ███     ░░░  ░███ ░   ░███  ░     ░███    ░███  ░█░░
+# ░███░░███░███ ░███      ░███░███         ░███          ░███     ░███        ░██████████   ░██████
+# ░███ ░░██████ ░███      ░███░███    █████░███    █████ ░███     ░███        ░███░░░░░███ ░███░░█
+# ░███  ░░█████ ░░███     ███ ░░███  ░░███ ░░███  ░░███  ░███     ░███        ░███    ░███ ░███ ░
+# █████  ░░█████ ░░░███████░   ░░█████████  ░░█████████  █████    █████       █████   █████░░█████
+#░░░░░    ░░░░░    ░░░░░░░      ░░░░░░░░░    ░░░░░░░░░  ░░░░░    ░░░░░       ░░░░░   ░░░░░ ░░░░░
+
+CMAKE_MINIMUM_REQUIRED(VERSION 3.21)
 CMAKE_POLICY(SET CMP0057 NEW) # "Support new IN_LIST if() operator."
-cmake_policy(SET CMP0135 NEW)
+CMAKE_POLICY(SET CMP0135 NEW)
 SET(CMAKE_CXX_STANDARD 20)
 SET(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+# Require C++20 for full Qt6 compatibility
+if(CMAKE_CXX_COMPILER_ID MATCHES "MSVC" AND MSVC_VERSION LESS 1930)
+  message(FATAL_ERROR "Visual Studio 2022 or later required for C++20 support")
+endif()
 
 #Including cmake dependencies
 INCLUDE(CheckCXXCompilerFlag)
@@ -22,6 +28,11 @@ INCLUDE(FetchContent)
 
 #Project name
 PROJECT(Noggit)
+
+# Enable Qt6 features
+SET(CMAKE_AUTOMOC ON)
+SET(CMAKE_AUTORCC ON)
+SET(CMAKE_AUTOUIC ON)
 
 #Covered by CMAKE_CXX_STANDARD
 add_compiler_flag_if_supported(CMAKE_CXX_FLAGS -Wno-c++98-compat)
@@ -114,7 +125,14 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(FastNoise2)
 
 FIND_PACKAGE(Sol2 REQUIRED)
-FIND_PACKAGE(Qt5 COMPONENTS Widgets OpenGLExtensions Gui Network Xml Multimedia Sql REQUIRED)
+# Qt6 migration: Using Qt6 with fallback to Qt5.15 for compatibility
+FIND_PACKAGE(Qt6 COMPONENTS Widgets OpenGLExtensions Gui Network Xml Multimedia Sql)
+IF(NOT Qt6_FOUND)
+  FIND_PACKAGE(Qt5 5.15 COMPONENTS Widgets OpenGLExtensions Gui Network Xml Multimedia Sql REQUIRED)
+  SET(USE_QT5 TRUE)
+ELSE()
+  SET(USE_QT5 FALSE)
+ENDIF()
 
 ADD_SUBDIRECTORY("${EXTERNAL_SOURCE_DIR}/qt-color-widgets")
 ADD_SUBDIRECTORY("${EXTERNAL_SOURCE_DIR}/framelesshelper")
@@ -177,7 +195,13 @@ INCLUDE_DIRECTORIES("${CMAKE_SOURCE_DIR}/${EXTERNAL_SOURCE_DIR}/qtgradienteditor
 INCLUDE_DIRECTORIES("${CMAKE_SOURCE_DIR}/${EXTERNAL_SOURCE_DIR}/tracy")
 INCLUDE_DIRECTORIES("${CMAKE_SOURCE_DIR}/${EXTERNAL_SOURCE_DIR}/blizzard-database-library/include")
 INCLUDE_DIRECTORIES("${CMAKE_SOURCE_DIR}/${EXTERNAL_SOURCE_DIR}/blizzard-archive-library/include")
-INCLUDE_DIRECTORIES(${Qt5Gui_PRIVATE_INCLUDE_DIRS})
+
+# Qt6 compatibility fix
+IF(USE_QT5)
+  INCLUDE_DIRECTORIES(${Qt5Gui_PRIVATE_INCLUDE_DIRS})
+ELSE()
+  INCLUDE_DIRECTORIES(${Qt6Gui_PRIVATE_INCLUDE_DIRS})
+ENDIF()
 
 #Load noggit source files
 collect_files(math_sources src/math FALSE "*.cpp" "")
@@ -224,9 +248,20 @@ IF(WIN32)
 ENDIF(WIN32)
 
 collect_files(resource_files resources FALSE "*.qrc" "")
-qt5_add_resources(compiled_resource_files ${resource_files})
+# Qt6 compatible resource handling
+IF(USE_QT5)
+  qt5_add_resources(compiled_resource_files ${resource_files})
+ELSE()
+  qt_add_resources(compiled_resource_files ${resource_files})
+ENDIF()
+
 collect_files(ui_files src TRUE "*.ui" "")
-qt5_wrap_ui(compiled_ui_files ${ui_files})
+# Qt6 compatible UI handling
+IF(USE_QT5)
+  qt5_wrap_ui(compiled_ui_files ${ui_files})
+ELSE()
+  qt6_wrap_ui(compiled_ui_files ${ui_files})
+ENDIF()
 
 assign_specific_source_group("noggit/ui/generated" ${compiled_ui_files})
 assign_specific_source_group("util/win" ${os_sources} ${os_headers})
@@ -316,52 +351,98 @@ if (UNIX)
   TARGET_LINK_LIBRARIES (noggit ${BZIP2_LIBRARIES})
 ENDIF()
 
+# Qt6 compatible linking
+IF(USE_QT5)
+  TARGET_LINK_LIBRARIES (noggit
+    ${OPENGL_LIBRARIES}
+    StormLib
+    CascLib
+    Qt5::Gui
+    Qt5::Widgets
+    Qt5::OpenGLExtensions
+    Qt5::Xml
+    Qt5::Network
+    Qt5::Multimedia
+    Qt5::Sql
+    ColorWidgets-qt5
+    FramelessHelper
+    qt_imgui_widgets
+    qtadvanceddocking
+    nodes
+    noise-static
+    noiseutils-static
+    glm
+    lodepng
+    FastNoise
+    nlohmann_json::nlohmann_json
+    sol2::sane
+    blizzard-archive-library
+    blizzard-database-library
+    rapidfuzz::rapidfuzz
+  )
+ELSE()
+  TARGET_LINK_LIBRARIES (noggit
+    ${OPENGL_LIBRARIES}
+    StormLib
+    CascLib
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::OpenGLExtensions
+    Qt6::Xml
+    Qt6::Network
+    Qt6::Multimedia
+    Qt6::Sql
+    ColorWidgets-qt6
+    FramelessHelper
+    qt_imgui_widgets
+    qtadvanceddocking
+    nodes
+    noise-static
+    noiseutils-static
+    glm
+    lodepng
+    FastNoise
+    nlohmann_json::nlohmann_json
+    sol2::sane
+    blizzard-archive-library
+    blizzard-database-library
+    rapidfuzz::rapidfuzz
+  )
+ENDIF()
 
-TARGET_LINK_LIBRARIES (noggit
-  ${OPENGL_LIBRARIES}
-  StormLib
-  CascLib
-  Qt5::Gui
-  Qt5::Widgets
-  Qt5::OpenGLExtensions
-  Qt5::Xml
-  Qt5::Network
-  Qt5::Multimedia
-  Qt5::Sql
-  ColorWidgets-qt5
-  FramelessHelper
-  qt_imgui_widgets
-  qtadvanceddocking
-  nodes
-  noise-static
-  noiseutils-static
-  glm
-  lodepng
-  FastNoise
-  nlohmann_json::nlohmann_json
-  sol2::sane
-  blizzard-archive-library
-  blizzard-database-library
-  rapidfuzz::rapidfuzz
-)
 include(ExternalProject)
 
+# Qt6 compatible qmake query
+IF(USE_QT5)
+  execute_process(
+      COMMAND ${Qt5Core_DIR}/../../../bin/qmake -query QT_VERSION
+      OUTPUT_VARIABLE QT_FULL_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+ELSE()
+  execute_process(
+      COMMAND ${Qt6_DIR}/../../../libexec/qmake -query QT_VERSION
+      OUTPUT_VARIABLE QT_FULL_VERSION
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+ENDIF()
 
-# Fetch qsqlmysql.dll plugin based on Qt version #####
-execute_process(
-    COMMAND ${Qt5Core_DIR}/../../../bin/qmake -query QT_VERSION
-    OUTPUT_VARIABLE QT_FULL_VERSION
-    OUTPUT_STRIP_TRAILING_WHITESPACE
-)
 message(STATUS "Qt full version: ${QT_FULL_VERSION}")
 
 # prebuilds available at : https://github.com/thecodemonkey86/qt_mysql_driver/releases
 # get direct download links
 if(WIN32)
   if(MSVC)
-        set(QMYSQL_PREBUILT_DRIVER_URL
-            "https://github.com/thecodemonkey86/qt_mysql_driver/files/5575770/qsqlmysql.dll_Qt_SQL_driver_${QT_FULL_VERSION}_MSVC2019_64-bit.zip"
-        )
+    if(USE_QT5)
+      set(QMYSQL_PREBUILT_DRIVER_URL
+          "https://github.com/thecodemonkey86/qt_mysql_driver/files/5575770/qsqlmysql.dll_Qt_SQL_driver_${QT_FULL_VERSION}_MSVC2019_64-bit.zip"
+      )
+    else()
+      # Qt6 MySQL driver (when available)
+      set(QMYSQL_PREBUILT_DRIVER_URL
+          "https://github.com/thecodemonkey86/qt_mysql_driver/files/5575770/qsqlmysql.dll_Qt_SQL_driver_${QT_FULL_VERSION}_MSVC2019_64-bit.zip"
+      )
+    endif()
     elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU") # MinGW
         set(QMYSQL_PREBUILT_DRIVER_URL
             "https://github.com/thecodemonkey86/qt_mysql_driver/files/5575769/qsqlmysql.dll_Qt_SQL_driver_${QT_FULL_VERSION}_MinGW_8.1.0_64-bit.zip"
@@ -456,10 +537,21 @@ add_custom_command(TARGET noggit POST_BUILD
         "${PROJECT_SOURCE_DIR}/src/noggit/rendering/glsl"
         "$<TARGET_FILE_DIR:noggit>/shaders")
 
-# deploy for Qt on Windows
+# deploy for Qt on Windows (Qt6 compatible)
 IF(WIN32)
-  include(windeployqt)
-  windeployqt(noggit)
+  IF(USE_QT5)
+    include(windeployqt)
+    windeployqt(noggit)
+  ELSE()
+    # Qt6 deployment
+    get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+    get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+    add_custom_command(TARGET noggit POST_BUILD
+      COMMAND ${WINDEPLOYQT_EXECUTABLE} "$<TARGET_FILE:noggit>"
+      COMMENT "Running windeployqt..."
+    )
+  ENDIF()
 ENDIF()
 
 SET_PROPERTY(TARGET noggit PROPERTY AUTOMOC ON)
