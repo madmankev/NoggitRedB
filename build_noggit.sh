@@ -1,9 +1,9 @@
 #!/bin/bash
 set -e
 
-echo "=========================================="
+echo "==========================================" 
 echo "NoggitRedB Build Script"
-echo "=========================================="
+echo "==========================================" 
 
 # Detect OS
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
@@ -26,16 +26,16 @@ elif [[ "$OSTYPE" == "darwin"* ]]; then
 fi
 
 echo ""
-echo "=========================================="
+echo "==========================================" 
 echo "Creating build directory..."
-echo "=========================================="
+echo "==========================================" 
 mkdir -p build
 cd build
 
 echo ""
-echo "=========================================="
+echo "==========================================" 
 echo "Running CMake configuration..."
-echo "=========================================="
+echo "==========================================" 
 cmake \
     -DCMAKE_BUILD_TYPE=Release \
     -DNOGGIT_BUILD_NODE_DATAMODELS=ON \
@@ -43,9 +43,9 @@ cmake \
     ..
 
 echo ""
-echo "=========================================="
+echo "==========================================" 
 echo "Building NoggitRedB..."
-echo "=========================================="
+echo "==========================================" 
 
 if [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "darwin"* ]]; then
     make -j $(nproc)
@@ -54,8 +54,8 @@ else
 fi
 
 echo ""
-echo "=========================================="
+echo "==========================================" 
 echo "Build Complete!"
-echo "=========================================="
+echo "==========================================" 
 echo "Executable location: ./build/bin/noggit"
 echo "Run with: ./build/bin/noggit"
